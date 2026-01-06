@@ -60,7 +60,7 @@ def get_biz_info():
         # --- [모드 2: 정보 추출] ---
         image_url = params.get('image')
         user_input = params.get('user_input', utterance)
-        prompt = "사업자 정보(상호, 대표, 주소, 전화, 팩스, 이메일)를 '항목 : 내용' 형식으로 추출해줘."
+        prompt = "사업자등록증에서 다음 정보를 찾아 '항목 : 내용' 형식으로 한 줄씩 적어줘. 상호, 대표, 주소, 전화, 팩스, 이메일. 만약 없는 정보라면 '없음'이라고 적어줘. 다른 설명은 하지 마."
 
         if image_url:
             img_res = requests.get(image_url, timeout=10) # Render는 외부 접속 허용
