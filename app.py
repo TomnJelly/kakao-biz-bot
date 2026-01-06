@@ -57,7 +57,7 @@ def get_biz_info():
         client_extra = data.get('action', {}).get('clientExtra', {}) or {}
 
         # =====================================
-        # [모드 1] 연락처 파일 요청 → 링크만 전송
+        # [모드 1] 연락처 파일 생성
         # =====================================
         if "연락처" in user_input_nospace:
             name = client_extra.get('name', '이름없음')
@@ -87,16 +87,22 @@ def get_biz_info():
                 "version": "2.0",
                 "template": {
                     "outputs": [{
-                        "simpleText": {
-                            "text": f"아래 링크를 눌러 연락처를 다운로드하세요.\n\n{download_url}"
+                        "basicCard": {
+                            "title": "연락처 파일 생성 완료",
+                            "description": f"{name} / {org}",
+                            "buttons": [{
+                                "action": "webLink",
+                                "label": "VCF 다운로드",
+                                "webLinkUrl": download_url
+                            }]
                         }
                     }]
                 }
             })
 
-        # =========================
-        # [모드 2] 정보 추출
-        # =========================
+        # =====================================
+        # [모드 2] 명함 / 정보 분석
+        # =====================================
         image_url = params.get('image')
 
         prompt = """명함이나 사업자등록증에서 정보를 추출해줘.
@@ -143,7 +149,7 @@ def get_biz_info():
                     info[k] = val
 
         result_text = (
-            "분석 결과\n"
+            "분석 결과\n\n"
             f"상호 : {info['상호']}\n"
             f"대표 : {info['대표']}\n"
             f"주소 : {info['주소']}\n"
@@ -156,10 +162,12 @@ def get_biz_info():
             "version": "2.0",
             "template": {
                 "outputs": [{
-                    "simpleText": {"text": result_text}
+                    "simpleText": {
+                        "text": result_text
+                    }
                 }],
                 "quickReplies": [{
-                    "label": "연락처 파일",
+                    "label": "연락처 파일 만들기",
                     "action": "message",
                     "messageText": "연락처",
                     "extra": {
@@ -177,7 +185,9 @@ def get_biz_info():
             "version": "2.0",
             "template": {
                 "outputs": [{
-                    "simpleText": {"text": f"오류 발생: {str(e)}"}
+                    "simpleText": {
+                        "text": f"오류 발생: {str(e)}"
+                    }
                 }]
             }
         })
