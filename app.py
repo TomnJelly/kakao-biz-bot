@@ -37,6 +37,7 @@ def download_file(filename):
     return send_from_directory(STATIC_DIR, filename, as_attachment=True)
 
 @app.route('/api/get_biz_info', methods=['POST'])
+@app.route('/api/get_biz_info/', methods=['POST'])
 def get_biz_info():
     try:
         model = get_model()
