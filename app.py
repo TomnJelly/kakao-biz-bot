@@ -12,7 +12,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 def get_model():
     if not GEMINI_API_KEY: return None
     genai.configure(api_key=GEMINI_API_KEY)
-    return genai.GenerativeModel('models/gemini-1.5-flash')
+    return genai.GenerativeModel('models/gemini-flash-latest')
 
 def format_tel(tel_str):
     if not tel_str: return ""
