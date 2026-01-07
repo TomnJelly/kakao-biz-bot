@@ -7,10 +7,8 @@ import google.generativeai as genai
 
 app = Flask(__name__)
 
-# 임시 파일 저장 경로
 STATIC_DIR = '/tmp/static'
-if not os.path.exists(STATIC_DIR):
-    os.makedirs(STATIC_DIR, exist_ok=True)
+os.makedirs(STATIC_DIR, exist_ok=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
@@ -43,114 +41,74 @@ def get_biz_info():
     try:
         model = get_model()
         data = request.get_json(force=True)
-        user_input = data.get('userRequest', {}).get('utterance', '').replace(" ", "")
+        user_utterance = data.get('userRequest', {}).get('utterance', '')
         params = data.get('action', {}).get('params', {})
         client_extra = data.get('action', {}).get('clientExtra', {}) or {}
 
-        # =====================================
-        # [모드 1] VCF 연락처 파일 생성
-        # =====================================
-        if "연락처" in user_input or client_extra:
-            raw_name = str(client_extra.get('name', '')).strip()
+        # [연락처 생성 모드]
+        if "연락처" in user_utterance.replace(" ","") or client_extra:
+            name = str(client_extra.get('name', '')).strip()
             org = str(client_extra.get('org', '')).strip()
-            tel = client_extra.get('tel', '')
-            email = client_extra.get('email', '')
-            addr = client_extra.get('addr', '')
-            fax = client_extra.get('fax', '')
-
-            # 이름 최적화: 대표명(상호)
-            has_name = raw_name and raw_name != '없음'
-            has_org = org and org != '없음'
-            display_name = f"{raw_name}({org})" if (has_name and has_org) else (raw_name if has_name else (org if has_org else "신규연락처"))
+            # 이름 형식 최적화
+            display_name = f"{name}({org})" if (name and org and name!='없음' and org!='없음') else (name if name!='없음' else org)
+            if not display_name or display_name == '없음': display_name = "신규연락처"
 
             vcf_lines = [
                 "BEGIN:VCARD", "VERSION:3.0",
                 f"FN;CHARSET=UTF-8:{display_name}",
                 f"N;CHARSET=UTF-8:{display_name};;;;",
-                f"ORG;CHARSET=UTF-8:{org if has_org else ''}",
-                f"TEL;TYPE=CELL:{tel}",
-                f"TEL;TYPE=FAX:{fax}",
-                f"EMAIL;TYPE=INTERNET:{email}",
-                f"ADR;CHARSET=UTF-8:;;{addr};;;", 
+                f"ORG;CHARSET=UTF-8:{org if org!='없음' else ''}",
+                f"TEL;TYPE=CELL:{client_extra.get('tel', '')}",
+                f"TEL;TYPE=FAX:{client_extra.get('fax', '')}",
+                f"EMAIL;TYPE=INTERNET:{client_extra.get('email', '')}",
+                f"ADR;CHARSET=UTF-8:;;{client_extra.get('addr', '')};;;",
                 "END:VCARD"
             ]
-            
             file_name = f"biz_{uuid.uuid4().hex[:8]}.vcf"
             file_path = os.path.join(STATIC_DIR, file_name)
-            with open(file_path, "w", encoding="utf-8") as f:
-                f.write("\n".join(vcf_lines))
-
-            download_url = f"{request.host_url.rstrip('/')}/download/{file_name}"
+            with open(file_path, "w", encoding="utf-8") as f: f.write("\n".join(vcf_lines))
             
             return jsonify({
                 "version": "2.0",
-                "template": {
-                    "outputs": [{"simpleText": {"text": f"✅ 연락처 생성이 완료되었습니다.\n\n👤 저장명: {display_name}\n\n🔗 아래 링크를 클릭해 저장하세요:\n{download_url}"}}]
-                }
+                "template": {"outputs": [{"simpleText": {"text": f"✅ 연락처 준비 완료\n👤 저장명: {display_name}\n🔗 다운로드: {request.host_url.rstrip('/')}/download/{file_name}"}}]}
             })
 
-        # =====================================
-        # [모드 2] 명함 정보 분석 (텍스트 분석 강화 버전)
-        # =====================================
+        # [명함 분석 모드]
         image_url = params.get('image') or params.get('sys_plugin_image')
-        
-        # AI가 텍스트 내용을 더 잘 이해하도록 지시사항 구체화
-        prompt = """
-        입력 데이터에서 다음 정보를 찾아 '항목:내용' 형식으로만 출력해.
-        1. 상호: 회사명/가게이름
-        2. 대표: 사람 이름
-        3. 주소: 도로명 또는 지번 주소
-        4. 전화: 번호 (형식 유지)
-        5. 팩스: 팩스 번호
-        6. 이메일: 메일 주소
-        
-        주의: 정보가 절대 없으면 '없음'이라고 써. 다른 설명은 하지마.
-        """
+        prompt = """명함/사업자정보에서 '상호, 대표, 주소, 전화, 팩스, 이메일'을 추출해. 
+        형식은 반드시 '항목:내용'으로만 줄바꿈해서 작성해. 없으면 '없음'이라고 적어."""
 
         if image_url:
             img_res = requests.get(image_url, timeout=5)
             response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": img_res.content}])
         else:
-            # 사용자가 보낸 텍스트 전체(utterance)를 분석 대상으로 전달
-            utterance = data.get('userRequest', {}).get('utterance', '')
-            response = model.generate_content(f"{prompt}\n\n분석할 내용:\n{utterance}")
+            # 텍스트로 보냈을 때 처리 강화
+            response = model.generate_content(f"{prompt}\n\n분석할 내용:\n{user_utterance}")
 
         res_text = response.text.strip()
         info = {"상호": "없음", "대표": "없음", "주소": "없음", "전화": "없음", "팩스": "없음", "이메일": "없음"}
         
-        # AI 응답 파싱 로직 강화
         for line in res_text.splitlines():
-            line = line.replace('*', '').strip() # 마크다운 별표 제거
-            if ':' in line:
-                k, v = line.split(':', 1)
-                k_clean = k.strip()
-                v_clean = v.strip()
+            clean_line = line.replace('*', '').strip() # 별표 제거
+            if ':' in clean_line:
+                k, v = clean_line.split(':', 1)
                 for key in info:
-                    if key in k_clean:
-                        if key in ['전화', '팩스']: v_clean = format_tel(v_clean)
-                        info[key] = v_clean
-
-        result_display = f"📋 분석 결과\n\n상호: {info['상호']}\n대표: {info['대표']}\n주소: {info['주소']}\n전화: {info['전화']}\n팩스: {info['팩스']}\n이메일: {info['이메일']}"
+                    if key in k:
+                        val = v.strip()
+                        info[key] = format_tel(val) if key in ['전화', '팩스'] else val
 
         return jsonify({
             "version": "2.0",
             "template": {
-                "outputs": [{"simpleText": {"text": result_display}}],
+                "outputs": [{"simpleText": {"text": f"📋 분석 결과\n\n상호: {info['상호']}\n대표: {info['대표']}\n주소: {info['주소']}\n전화: {info['전화']}\n팩스: {info['팩스']}\n이메일: {info['이메일']}"}}],
                 "quickReplies": [{
-                    "label": "📁 연락처 파일 만들기",
-                    "action": "message",
-                    "messageText": "연락처 파일 만들어줘",
-                    "extra": {
-                        "name": info['대표'], "org": info['상호'], 
-                        "tel": info['전화'], "email": info['이메일'],
-                        "addr": info['주소'], "fax": info['팩스']
-                    }
+                    "label": "📁 연락처 파일 만들기", "action": "message", "messageText": "연락처 파일 만들어줘",
+                    "extra": {"name": info['대표'], "org": info['상호'], "tel": info['전화'], "email": info['이메일'], "addr": info['주소'], "fax": info['팩스']}
                 }]
             }
         })
-
     except Exception as e:
-        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"🚨 다시 시도해주세요. (오류: {str(e)[:20]})"}}]}})
+        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석에 실패했습니다. 내용을 다시 확인해주세요."}}]}})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
