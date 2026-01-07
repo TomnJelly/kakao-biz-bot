@@ -3,7 +3,7 @@ import uuid
 import re
 import requests
 from flask import Flask, request, jsonify, send_from_directory
-import google.generativeai as genai
+from google import genai
 
 app = Flask(__name__)
 
