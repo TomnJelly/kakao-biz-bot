@@ -7,6 +7,7 @@ import google.generativeai as genai
 
 app = Flask(__name__)
 
+# 임시 파일 저장 경로
 STATIC_DIR = '/tmp/static'
 os.makedirs(STATIC_DIR, exist_ok=True)
 
@@ -41,18 +42,15 @@ def get_biz_info():
         model = get_model()
         data = request.get_json(force=True)
         
-        # [핵심 수정] 사용자님의 오픈빌더 설정(user_input)과 utterance를 모두 체크
         params = data.get('action', {}).get('params', {})
-        # 1. 오픈빌더에 설정하신 'user_input' 파라미터에서 먼저 가져옴
-        # 2. 없다면 utterance에서 가져옴
+        # 사용자님의 user_input 설정과 utterance 교차 확인
         user_text = params.get('user_input') or data.get('userRequest', {}).get('utterance', '')
-        
         client_extra = data.get('action', {}).get('clientExtra', {}) or {}
 
-        # --- [모드 1] VCF 연락처 파일 생성 ---
+        # --- [모드 1] VCF 연락처 생성 및 '텍스트 링크' 발송 ---
         if "연락처" in user_text.replace(" ", "") or client_extra:
             name = client_extra.get('name') or "이름없음"
-            org = client_extra.get('org') or ""
+            org = client_extra.get('org', "").strip('.') or "" # 상호 끝 마침표 제거
             tel = client_extra.get('tel') or ""
             email = client_extra.get('email') or ""
             addr = client_extra.get('addr') or ""
@@ -77,37 +75,29 @@ def get_biz_info():
                 f.write(vcf_content)
 
             download_url = f"{request.host_url.rstrip('/')}/download/{file_name}"
+            
+            # 버튼 없이 텍스트 링크로만 응답
             return jsonify({
                 "version": "2.0",
                 "template": {
                     "outputs": [{
-                        "basicCard": {
-                            "title": f"📂 {display_name} 저장",
-                            "description": f"상호: {org}\n전화: {tel}\n주소: {addr}",
-                            "buttons": [{"action": "webLink", "label": "VCF 파일 저장", "webLinkUrl": download_url}]
+                        "simpleText": {
+                            "text": f"📂 {display_name} 연락처 생성이 완료되었습니다.\n\n아래 링크를 클릭하여 파일을 저장하세요:\n{download_url}"
                         }
                     }]
                 }
             })
 
-        # --- [모드 2] 명함/이미지 분석 ---
+        # --- [모드 2] 명함 분석 ---
         image_url = params.get('image') or params.get('sys_plugin_image')
-        prompt = """명함 정보를 추출해. 반드시 다음 형식을 지켜:
-상호:내용
-대표:내용
-주소:내용
-전화:내용
-팩스:내용
-이메일:내용
-정보 없으면 '없음'으로 표시해."""
+        prompt = "명함에서 상호, 대표, 주소, 전화, 팩스, 이메일을 추출해. '항목:내용' 형식으로 쓰고 없으면 '없음'으로 표시해."
 
         if image_url:
             img_res = requests.get(image_url, timeout=5)
             response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": img_res.content}])
         else:
-            # 인식된 user_text가 비어있으면 에러 방지
             if not user_text.strip():
-                 return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석할 내용을 찾을 수 없습니다."}}]}})
+                 return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석할 내용을 입력해주세요."}}]}})
             response = model.generate_content(f"{prompt}\n\n내용:\n{user_text}")
 
         res_text = response.text.strip()
@@ -119,7 +109,8 @@ def get_biz_info():
                 k, v = line.split(':', 1)
                 for key in info:
                     if key in k:
-                        info[key] = format_tel(v.strip()) if key in ['전화', '팩스'] else v.strip()
+                        val = v.strip().strip('.') # 상호 등 끝에 붙은 마침표 제거
+                        info[key] = format_tel(val) if key in ['전화', '팩스'] else val
 
         return jsonify({
             "version": "2.0",
@@ -135,7 +126,7 @@ def get_biz_info():
         })
 
     except Exception as e:
-        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "잠시 후 다시 시도해 주세요."}}]}})
+        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "처리에 실패했습니다. 다시 시도해주세요."}}]}})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
