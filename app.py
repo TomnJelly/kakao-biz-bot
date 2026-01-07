@@ -45,7 +45,7 @@ def get_biz_info():
         user_text = params.get('user_input') or data.get('userRequest', {}).get('utterance', '')
         client_extra = data.get('action', {}).get('clientExtra', {}) or {}
 
-        # --- [모드 1] VCF 연락처 생성 (항목명 최적화) ---
+        # --- [모드 1] VCF 연락처 생성 (모든 라벨 한글화) ---
         if "연락처" in user_text.replace(" ", "") or client_extra:
             name = client_extra.get('name') or "이름없음"
             org = client_extra.get('org', "").strip('.') or ""
@@ -54,20 +54,23 @@ def get_biz_info():
             email = client_extra.get('email') or ""
             addr = client_extra.get('addr') or ""
 
-            # 1. 이름 형식 변경: 이름(상호)
             display_name = f"{name}({org})" if org and org != "없음" else name
             
-            # 2. VCF 필드 수정 (스마트폰 라벨 매칭 최적화)
+            # 모든 항목에 X-ABLabel을 사용하여 라벨 이름을 강제 지정
             vcf_content = (
                 "BEGIN:VCARD\n"
                 "VERSION:3.0\n"
                 f"FN;CHARSET=UTF-8:{display_name}\n"
                 f"N;CHARSET=UTF-8:{display_name};;;;\n"
                 f"ORG;CHARSET=UTF-8:{org}\n"
-                f"TEL;TYPE=CELL:{tel}\n"         # 휴대폰 -> 전화번호
-                f"TEL;TYPE=FAX,WORK:{fax}\n"    # WORK FAX -> 팩스번호
-                f"EMAIL;TYPE=INTERNET:{email}\n" # EMAIL -> 이메일
-                f"ADR;TYPE=WORK;CHARSET=UTF-8:;;{addr};;;\n" # WORK -> 주소
+                f"item1.TEL:{tel}\n"
+                "item1.X-ABLabel:전화번호\n"
+                f"item2.TEL:{fax}\n"
+                "item2.X-ABLabel:팩스번호\n"
+                f"item3.EMAIL;TYPE=INTERNET:{email}\n"
+                "item3.X-ABLabel:이메일\n"
+                f"item4.ADR;CHARSET=UTF-8:;;{addr};;;\n"
+                "item4.X-ABLabel:주소\n"
                 "END:VCARD"
             )
             
