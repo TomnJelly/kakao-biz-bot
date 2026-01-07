@@ -7,7 +7,6 @@ import google.generativeai as genai
 
 app = Flask(__name__)
 
-# 임시 파일 저장 경로
 STATIC_DIR = '/tmp/static'
 os.makedirs(STATIC_DIR, exist_ok=True)
 
@@ -43,29 +42,32 @@ def get_biz_info():
         data = request.get_json(force=True)
         
         params = data.get('action', {}).get('params', {})
-        # 사용자님의 user_input 설정과 utterance 교차 확인
         user_text = params.get('user_input') or data.get('userRequest', {}).get('utterance', '')
         client_extra = data.get('action', {}).get('clientExtra', {}) or {}
 
-        # --- [모드 1] VCF 연락처 생성 및 '텍스트 링크' 발송 ---
+        # --- [모드 1] VCF 연락처 생성 (항목명 최적화) ---
         if "연락처" in user_text.replace(" ", "") or client_extra:
             name = client_extra.get('name') or "이름없음"
-            org = client_extra.get('org', "").strip('.') or "" # 상호 끝 마침표 제거
+            org = client_extra.get('org', "").strip('.') or ""
             tel = client_extra.get('tel') or ""
+            fax = client_extra.get('fax') or ""
             email = client_extra.get('email') or ""
             addr = client_extra.get('addr') or ""
 
+            # 1. 이름 형식 변경: 이름(상호)
             display_name = f"{name}({org})" if org and org != "없음" else name
             
+            # 2. VCF 필드 수정 (스마트폰 라벨 매칭 최적화)
             vcf_content = (
                 "BEGIN:VCARD\n"
                 "VERSION:3.0\n"
                 f"FN;CHARSET=UTF-8:{display_name}\n"
                 f"N;CHARSET=UTF-8:{display_name};;;;\n"
                 f"ORG;CHARSET=UTF-8:{org}\n"
-                f"TEL;TYPE=CELL:{tel}\n"
-                f"EMAIL;TYPE=INTERNET:{email}\n"
-                f"ADR;CHARSET=UTF-8:;;{addr};;;\n"
+                f"TEL;TYPE=CELL:{tel}\n"         # 휴대폰 -> 전화번호
+                f"TEL;TYPE=FAX,WORK:{fax}\n"    # WORK FAX -> 팩스번호
+                f"EMAIL;TYPE=INTERNET:{email}\n" # EMAIL -> 이메일
+                f"ADR;TYPE=WORK;CHARSET=UTF-8:;;{addr};;;\n" # WORK -> 주소
                 "END:VCARD"
             )
             
@@ -76,7 +78,6 @@ def get_biz_info():
 
             download_url = f"{request.host_url.rstrip('/')}/download/{file_name}"
             
-            # 버튼 없이 텍스트 링크로만 응답
             return jsonify({
                 "version": "2.0",
                 "template": {
@@ -109,7 +110,7 @@ def get_biz_info():
                 k, v = line.split(':', 1)
                 for key in info:
                     if key in k:
-                        val = v.strip().strip('.') # 상호 등 끝에 붙은 마침표 제거
+                        val = v.strip().strip('.')
                         info[key] = format_tel(val) if key in ['전화', '팩스'] else val
 
         return jsonify({
@@ -120,13 +121,13 @@ def get_biz_info():
                     "label": "📁 연락처 파일 만들기",
                     "action": "message",
                     "messageText": "연락처 파일 만들어줘",
-                    "extra": {"name": info['대표'], "org": info['상호'], "tel": info['전화'], "email": info['이메일'], "addr": info['주소']}
+                    "extra": {"name": info['대표'], "org": info['상호'], "tel": info['전화'], "fax": info['팩스'], "email": info['이메일'], "addr": info['주소']}
                 }]
             }
         })
 
     except Exception as e:
-        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "처리에 실패했습니다. 다시 시도해주세요."}}]}})
+        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "처리에 실패했습니다."}}]}})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
