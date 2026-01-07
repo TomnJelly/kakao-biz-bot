@@ -41,23 +41,22 @@ def get_biz_info():
         model = get_model()
         data = request.get_json(force=True)
         
-        # [수정] 데이터 유실 방지 로직: utterance와 params를 모두 확인
-        user_input = data.get('userRequest', {}).get('utterance', '')
+        # [핵심 수정] 사용자님의 오픈빌더 설정(user_input)과 utterance를 모두 체크
         params = data.get('action', {}).get('params', {})
-        if not user_input or len(user_input.strip()) < 1:
-            user_input = params.get('sys.text', '')
-            
+        # 1. 오픈빌더에 설정하신 'user_input' 파라미터에서 먼저 가져옴
+        # 2. 없다면 utterance에서 가져옴
+        user_text = params.get('user_input') or data.get('userRequest', {}).get('utterance', '')
+        
         client_extra = data.get('action', {}).get('clientExtra', {}) or {}
 
         # --- [모드 1] VCF 연락처 파일 생성 ---
-        if "연락처" in user_input.replace(" ", "") or client_extra:
+        if "연락처" in user_text.replace(" ", "") or client_extra:
             name = client_extra.get('name') or "이름없음"
             org = client_extra.get('org') or ""
             tel = client_extra.get('tel') or ""
             email = client_extra.get('email') or ""
             addr = client_extra.get('addr') or ""
 
-            # 요청하신 이름 형식: 이름(상호)
             display_name = f"{name}({org})" if org and org != "없음" else name
             
             vcf_content = (
@@ -93,7 +92,7 @@ def get_biz_info():
 
         # --- [모드 2] 명함/이미지 분석 ---
         image_url = params.get('image') or params.get('sys_plugin_image')
-        prompt = """명함에서 정보를 추출해. 반드시 다음 형식을 지켜:
+        prompt = """명함 정보를 추출해. 반드시 다음 형식을 지켜:
 상호:내용
 대표:내용
 주소:내용
@@ -106,8 +105,10 @@ def get_biz_info():
             img_res = requests.get(image_url, timeout=5)
             response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": img_res.content}])
         else:
-            # 텍스트 분석 실행
-            response = model.generate_content(f"{prompt}\n\n내용:\n{user_input}")
+            # 인식된 user_text가 비어있으면 에러 방지
+            if not user_text.strip():
+                 return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석할 내용을 찾을 수 없습니다."}}]}})
+            response = model.generate_content(f"{prompt}\n\n내용:\n{user_text}")
 
         res_text = response.text.strip()
         info = {"상호": "없음", "대표": "없음", "주소": "없음", "전화": "없음", "팩스": "없음", "이메일": "없음"}
@@ -134,7 +135,7 @@ def get_biz_info():
         })
 
     except Exception as e:
-        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "처리 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요."}}]}})
+        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "잠시 후 다시 시도해 주세요."}}]}})
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
