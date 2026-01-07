@@ -7,7 +7,6 @@ import google.generativeai as genai
 
 app = Flask(__name__)
 
-# 임시 파일 저장 경로 (Render 환경용)
 STATIC_DIR = '/tmp/static'
 os.makedirs(STATIC_DIR, exist_ok=True)
 
@@ -16,7 +15,6 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 def get_model():
     if not GEMINI_API_KEY: return None
     genai.configure(api_key=GEMINI_API_KEY)
-    # 현재 환경에서 작동하는 최신 모델 (latest) 유지
     return genai.GenerativeModel('models/gemini-flash-latest')
 
 def format_tel(tel_str):
@@ -30,8 +28,7 @@ def format_tel(tel_str):
     return tel_str
 
 @app.route('/')
-def health_check():
-    return "OK", 200
+def health_check(): return "OK", 200
 
 @app.route('/download/<filename>')
 def download_file(filename):
@@ -44,25 +41,25 @@ def get_biz_info():
         model = get_model()
         data = request.get_json(force=True)
         
-        # [데이터 추출] 잘 됐던 방식 그대로 utterance에서 가져옵니다.
-        user_input = data.get('userRequest', {}).get('utterance', '') 
-        
+        # [수정] 데이터 유실 방지 로직: utterance와 params를 모두 확인
+        user_input = data.get('userRequest', {}).get('utterance', '')
         params = data.get('action', {}).get('params', {})
+        if not user_input or len(user_input.strip()) < 1:
+            user_input = params.get('sys.text', '')
+            
         client_extra = data.get('action', {}).get('clientExtra', {}) or {}
 
         # --- [모드 1] VCF 연락처 파일 생성 ---
-        # 사용자가 "연락처 파일 만들어줘" 버튼을 눌렀을 때 작동
         if "연락처" in user_input.replace(" ", "") or client_extra:
             name = client_extra.get('name') or "이름없음"
             org = client_extra.get('org') or ""
             tel = client_extra.get('tel') or ""
             email = client_extra.get('email') or ""
-            addr = client_extra.get('addr') or "" # 주소 데이터 확보
+            addr = client_extra.get('addr') or ""
 
-            # [요청사항 1] 이름 형식을 "이름(상호)"로 변경
+            # 요청하신 이름 형식: 이름(상호)
             display_name = f"{name}({org})" if org and org != "없음" else name
             
-            # [요청사항 2] VCF에 주소(ADR) 필드 추가 및 한글 인코딩
             vcf_content = (
                 "BEGIN:VCARD\n"
                 "VERSION:3.0\n"
@@ -71,7 +68,7 @@ def get_biz_info():
                 f"ORG;CHARSET=UTF-8:{org}\n"
                 f"TEL;TYPE=CELL:{tel}\n"
                 f"EMAIL;TYPE=INTERNET:{email}\n"
-                f"ADR;CHARSET=UTF-8:;;{addr};;;\n" # '주소' 필드에 정확히 삽입
+                f"ADR;CHARSET=UTF-8:;;{addr};;;\n"
                 "END:VCARD"
             )
             
@@ -86,8 +83,8 @@ def get_biz_info():
                 "template": {
                     "outputs": [{
                         "basicCard": {
-                            "title": f"📂 {display_name} 연락처",
-                            "description": f"상호: {org}\n전화: {tel}\n주소: {addr}", # 카드 설명에 주소 표시
+                            "title": f"📂 {display_name} 저장",
+                            "description": f"상호: {org}\n전화: {tel}\n주소: {addr}",
                             "buttons": [{"action": "webLink", "label": "VCF 파일 저장", "webLinkUrl": download_url}]
                         }
                     }]
@@ -96,7 +93,6 @@ def get_biz_info():
 
         # --- [모드 2] 명함/이미지 분석 ---
         image_url = params.get('image') or params.get('sys_plugin_image')
-        
         prompt = """명함에서 정보를 추출해. 반드시 다음 형식을 지켜:
 상호:내용
 대표:내용
@@ -110,20 +106,19 @@ def get_biz_info():
             img_res = requests.get(image_url, timeout=5)
             response = model.generate_content([prompt, {"mime_type": "image/jpeg", "data": img_res.content}])
         else:
-            response = model.generate_content(f"{prompt}\n\n텍스트 내용:\n{user_input}")
+            # 텍스트 분석 실행
+            response = model.generate_content(f"{prompt}\n\n내용:\n{user_input}")
 
         res_text = response.text.strip()
         info = {"상호": "없음", "대표": "없음", "주소": "없음", "전화": "없음", "팩스": "없음", "이메일": "없음"}
         
         for line in res_text.splitlines():
+            line = re.sub(r'[*#\-]', '', line).strip()
             if ':' in line:
                 k, v = line.split(':', 1)
-                k = k.replace('*', '').strip()
-                v = v.strip()
                 for key in info:
                     if key in k:
-                        if key in ['전화', '팩스']: v = format_tel(v)
-                        info[key] = v
+                        info[key] = format_tel(v.strip()) if key in ['전화', '팩스'] else v.strip()
 
         return jsonify({
             "version": "2.0",
@@ -133,13 +128,7 @@ def get_biz_info():
                     "label": "📁 연락처 파일 만들기",
                     "action": "message",
                     "messageText": "연락처 파일 만들어줘",
-                    "extra": {
-                        "name": info['대표'], 
-                        "org": info['상호'], 
-                        "tel": info['전화'], 
-                        "email": info['이메일'], 
-                        "addr": info['주소'] # 퀵리플라이 데이터에도 주소 포함
-                    }
+                    "extra": {"name": info['대표'], "org": info['상호'], "tel": info['전화'], "email": info['이메일'], "addr": info['주소']}
                 }]
             }
         })
