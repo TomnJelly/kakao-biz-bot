@@ -97,7 +97,7 @@ def get_biz_info():
             # 사진 분석 로직 복구
             img_res = requests.get(image_url, timeout=5)
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-2.5-flash-lite',
                 contents=[prompt, {"mime_type": "image/jpeg", "data": img_res.content}]
             )
         else:
