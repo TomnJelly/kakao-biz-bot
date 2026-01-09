@@ -10,13 +10,12 @@ from google.genai import types
 
 app = Flask(__name__)
 
-# ✅ [성공 포인트 1] 경로를 다시 /tmp/static으로 설정
+# 경로 설정 (기존에 잘 작동하던 방식 유지)
 STATIC_DIR = '/tmp/static'
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 부하 분산 모델 설정 유지
 call_count = 0
 MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
 
@@ -24,7 +23,7 @@ def get_client():
     if not GEMINI_API_KEY: return None
     return genai.Client(api_key=GEMINI_API_KEY)
 
-# ✅ [요청 반영] 전화번호 마침표 제거 및 하이픈 포맷팅
+# 전화번호 마침표 제거 로직
 def format_tel(tel_str):
     if not tel_str or "없음" in tel_str: return "없음"
     nums = re.sub(r'[^0-9]', '', tel_str)
@@ -35,12 +34,11 @@ def format_tel(tel_str):
     return tel_str
 
 def create_res_template(info):
-    # ✅ [요청 반영] 홈페이지 없으면 한 줄 제외
+    # 홈페이지가 없으면 목록에서 제외
     web_line = ""
     if info.get('웹사이트') and info['웹사이트'] != "없음":
         web_line = f"🌐 웹사이트: {info['웹사이트']}\n"
     
-    # 출력 시 포맷팅 적용
     tel = format_tel(info.get('전화', '없음'))
     fax = format_tel(info.get('팩스', '없음'))
 
@@ -72,7 +70,6 @@ def create_res_template(info):
 
 def run_analysis(client, user_text, image_url):
     global call_count
-    # 🎯 [상식 로직 2줄 유지]
     prompt = (
         "너는 인간의 상식을 가진 세계 최고의 명함 정리 비서다. 사진을 분석하여 다음 규칙에 따라 정보를 추출하라.\n\n"
         "1. 상호: 로고 또는 사명 전체.\n"
@@ -80,16 +77,13 @@ def run_analysis(client, user_text, image_url):
         "3. 직급: 부서명 또는 직위.\n"
         "4. 주소: 전체 주소.\n"
         "5. 전화: 010(휴대폰) 번호를 최우선으로 '전화'에 넣고, 휴대폰이 없으면 070이나 02 등 유선번호를 채워라.\n"
-        "   - 중요: 070으로 시작하는 번호는 주로 전화번호이니, Fax 표시가 명확할 때만 팩스로 분류하라.\n"
-        "6. 팩스: 'F'나 'FAX' 표시가 명확한 번호만 추출하라. 표시가 없는 02 번호를 함부로 팩스에 넣지 마라.\n"
+        "6. 팩스: 'F'나 'FAX' 표시가 명확한 번호만 추출하라.\n"
         "7. 이메일: @ 포함 주소.\n"
-        "8. 웹사이트: 명함에 적힌 회사 홈페이지 URL (http 등 생략되어 있어도 추출).\n\n"
-        "※ 주의: 확실하지 않은 정보는 '없음'으로 표기하고 사족을 붙이지 마라. '항목: 내용' 형식으로 답하라."
+        "8. 웹사이트: 명함에 적힌 회사 홈페이지 URL.\n\n"
+        "※ 주의: 확실하지 않은 정보는 '없음'으로 표기하라."
     )
-    
     selected_model = MODELS[call_count % len(MODELS)]
     call_count += 1
-    
     try:
         if image_url:
             img_res = requests.get(image_url, timeout=15)
@@ -102,7 +96,6 @@ def run_analysis(client, user_text, image_url):
         
         res_text = response.text.strip()
         info = {"상호": "없음", "대표": "없음", "직급": "없음", "주소": "없음", "전화": "없음", "팩스": "없음", "이메일": "없음", "웹사이트": "없음"}
-        
         for line in res_text.splitlines():
             line = line.replace('*', '').strip()
             if ':' in line:
@@ -112,7 +105,7 @@ def run_analysis(client, user_text, image_url):
                     if key in k_raw:
                         if key == "대표":
                             v_raw = re.sub(r'(\||\/|대표이사|대표|소장|기술지원|사원|대리|과장|차장|부장|본부장|이사|팀장)', '', v_raw).strip()
-                        info[key] = v_raw 
+                        info[key] = v_raw
         return info
     except Exception:
         return {"상호": "분석지연", "대표": "재시도필요", "직급": "없음", "주소": "없음", "전화": "없음", "팩스": "없음", "이메일": "없음", "웹사이트": "없음"}
@@ -138,14 +131,25 @@ def get_biz_info():
             fax = format_tel(client_extra.get('팩스', ''))
             email, addr, web = client_extra.get('이메일', ''), client_extra.get('주소', ''), client_extra.get('웹사이트', '없음')
             
-            # ✅ [요청 반영] VCF 내 이름 형식을 "이름(상호)"로
+            # 🎯 [수정] VCF 내부 이름 형식을 "이름(상호)"로 설정
             display_name = f"{name}({org})"
-            vcf_content = (f"BEGIN:VCARD\r\nVERSION:3.0\r\nFN;CHARSET=UTF-8:{display_name}\r\nORG;CHARSET=UTF-8:{org}\r\n"
-                           f"TITLE;CHARSET=UTF-8:{job}\r\nTEL;TYPE=CELL,VOICE:{tel}\r\nTEL;TYPE=FAX:{fax}\r\n"
-                           f"EMAIL:{email}\r\nADR;CHARSET=UTF-8:;;{addr};;;\r\nURL:{web}\r\n"
-                           f"NOTE;CHARSET=UTF-8:직급: {job}\\n웹사이트: {web}\r\nEND:VCARD")
             
-            # ✅ [성공 포인트 2] 파일명 생성 및 링크 생성 방식을 이전 코드로 복원
+            # 🎯 [수정] 홈페이지가 '없음'이면 VCF에서 URL 항목을 완전히 제외
+            web_entry = f"URL:{web}\r\n" if web != "없음" else ""
+            
+            vcf_content = (f"BEGIN:VCARD\r\nVERSION:3.0\r\n"
+                           f"FN;CHARSET=UTF-8:{display_name}\r\n" # 주소록 표시 이름
+                           f"ORG;CHARSET=UTF-8:{org}\r\n"
+                           f"TITLE;CHARSET=UTF-8:{job}\r\n"
+                           f"TEL;TYPE=CELL,VOICE:{tel}\r\n"
+                           f"TEL;TYPE=FAX:{fax}\r\n"
+                           f"EMAIL:{email}\r\n"
+                           f"ADR;CHARSET=UTF-8:;;{addr};;;\r\n"
+                           f"{web_entry}" # 홈페이지 유무에 따라 한 줄 추가/제외
+                           f"NOTE;CHARSET=UTF-8:직급: {job}\r\n"
+                           f"END:VCARD")
+            
+            # 파일명은 404 방지를 위해 기존 랜덤 ID 방식 유지
             fn = f"biz_{uuid.uuid4().hex[:8]}.vcf"
             with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write(vcf_content)
             
@@ -176,7 +180,6 @@ def get_biz_info():
 
 @app.route('/download/<filename>')
 def download_file(filename):
-    # ✅ [성공 포인트 3] STATIC_DIR(/tmp/static)에서 파일을 직접 전송
     return send_from_directory(STATIC_DIR, filename, as_attachment=True)
 
 if __name__ == '__main__':
