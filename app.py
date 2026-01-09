@@ -15,7 +15,7 @@ os.makedirs(STATIC_DIR, exist_ok=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 부하 분산 모델 (사용자님 설정 유지)
+# 🚀 모델 리스트 및 부하 분산 설정 (유지)
 call_count = 0
 MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
 
@@ -23,17 +23,26 @@ def get_client():
     if not GEMINI_API_KEY: return None
     return genai.Client(api_key=GEMINI_API_KEY)
 
+# 🎯 [수정] 모든 기호를 제거하고 한국식 하이픈(-) 포맷으로 통일
 def format_tel(tel_str):
     if not tel_str or "없음" in tel_str: return "없음"
     nums = re.sub(r'[^0-9]', '', tel_str)
+    
     if len(nums) == 10:
-        return f"{nums[:2]}-{nums[2:6]}-{nums[6:]}" if nums.startswith('02') else f"{nums[:3]}-{nums[3:6]}-{nums[6:]}"
+        if nums.startswith('02'):
+            return f"{nums[:2]}-{nums[2:6]}-{nums[6:]}"
+        else:
+            return f"{nums[:3]}-{nums[3:6]}-{nums[6:]}"
     elif len(nums) == 11:
         return f"{nums[:3]}-{nums[3:7]}-{nums[7:]}"
     return tel_str
 
 def create_res_template(info):
-    web_line = f"🌐 웹사이트: {info.get('웹사이트', '없음')}\n" if info.get('웹사이트') != "없음" else ""
+    # 🎯 [수정] 홈페이지가 없으면 목록에서 아예 제외
+    web_line = ""
+    if info.get('웹사이트') and info['웹사이트'] != "없음":
+        web_line = f"🌐 웹사이트: {info['웹사이트']}\n"
+    
     text = (
         f"📋 명함 분석 결과\n"
         f"━━━━━━━━━━━━━━\n"
@@ -62,7 +71,7 @@ def create_res_template(info):
 
 def run_analysis(client, user_text, image_url):
     global call_count
-    # 🎯 [상식 로직 2줄 유지]
+    # 🎯 [상식 로직 2줄 포함 프롬프트 유지]
     prompt = (
         "너는 인간의 상식을 가진 세계 최고의 명함 정리 비서다. 사진을 분석하여 다음 규칙에 따라 정보를 추출하라.\n\n"
         "1. 상호: 로고 또는 사명 전체.\n"
@@ -107,10 +116,9 @@ def run_analysis(client, user_text, image_url):
     except Exception:
         return {"상호": "분석지연", "대표": "재시도필요", "직급": "없음", "주소": "없음", "전화": "없음", "팩스": "없음", "이메일": "없음", "웹사이트": "없음"}
 
-# --- 🚀 404 방어용 루트 경로 추가 ---
 @app.route('/')
 def home():
-    return "Server is Live!"
+    return "Business Card Bot is running!"
 
 @app.route('/api/get_biz_info', methods=['POST'])
 @app.route('/api/get_biz_info/', methods=['POST'])
@@ -127,14 +135,16 @@ def get_biz_info():
             name, org, job = client_extra.get('대표', '이름'), client_extra.get('상호', ''), client_extra.get('직급', '')
             tel, fax, email, addr, web = client_extra.get('전화', ''), client_extra.get('팩스', ''), client_extra.get('이메일', ''), client_extra.get('주소', ''), client_extra.get('웹사이트', '없음')
             
-            vcf_content = (f"BEGIN:VCARD\r\nVERSION:3.0\r\nFN;CHARSET=UTF-8:{name}\r\nORG;CHARSET=UTF-8:{org}\r\n"
+            # 🎯 [수정] 연락처 이름 형식을 "이름(상호)"로 설정
+            display_name = f"{name}({org})"
+            vcf_content = (f"BEGIN:VCARD\r\nVERSION:3.0\r\nFN;CHARSET=UTF-8:{display_name}\r\nORG;CHARSET=UTF-8:{org}\r\n"
                            f"TITLE;CHARSET=UTF-8:{job}\r\nTEL;TYPE=CELL,VOICE:{tel}\r\nTEL;TYPE=FAX:{fax}\r\n"
                            f"EMAIL:{email}\r\nADR;CHARSET=UTF-8:;;{addr};;;\r\nURL:{web}\r\n"
                            f"NOTE;CHARSET=UTF-8:직급: {job}\\n웹사이트: {web}\r\nEND:VCARD")
-            fn = f"biz_{uuid.uuid4().hex[:8]}.vcf"
+            
+            fn = re.sub(r'[\\/:*?"<>|]', '', f"{name}_{org}.vcf")
             with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write(vcf_content)
-            # URL 생성 시 슬래시(/) 누락 방지
-            return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"📂 {name}({org}) 연락처 저장:\n{request.host_url.rstrip('/')}/download/{fn}"}}]}})
+            return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"📂 {display_name} 연락처 저장:\n{request.host_url.rstrip('/')}/download/{fn}"}}]}})
 
         if not image_url:
             utterance = data.get('userRequest', {}).get('utterance', '')
