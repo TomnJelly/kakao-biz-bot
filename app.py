@@ -10,12 +10,13 @@ from google.genai import types
 
 app = Flask(__name__)
 
+# ✅ [성공 포인트 1] 경로를 다시 /tmp/static으로 설정
 STATIC_DIR = '/tmp/static'
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 🚀 모델 리스트 및 부하 분산 설정 (유지)
+# 부하 분산 모델 설정 유지
 call_count = 0
 MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
 
@@ -23,32 +24,25 @@ def get_client():
     if not GEMINI_API_KEY: return None
     return genai.Client(api_key=GEMINI_API_KEY)
 
-# 🎯 [수정] 모든 기호를 숫자로만 바꾼 뒤 한국식 하이픈(-) 포맷으로 재조합
+# ✅ [요청 반영] 전화번호 마침표 제거 및 하이픈 포맷팅
 def format_tel(tel_str):
     if not tel_str or "없음" in tel_str: return "없음"
-    # 숫자만 남기기 (마침표 등 모든 기호 제거)
     nums = re.sub(r'[^0-9]', '', tel_str)
-    
     if len(nums) == 10:
-        if nums.startswith('02'):
-            return f"{nums[:2]}-{nums[2:6]}-{nums[6:]}"
-        else:
-            return f"{nums[:3]}-{nums[3:6]}-{nums[6:]}"
+        return f"{nums[:2]}-{nums[2:6]}-{nums[6:]}" if nums.startswith('02') else f"{nums[:3]}-{nums[3:6]}-{nums[6:]}"
     elif len(nums) == 11:
         return f"{nums[:3]}-{nums[3:7]}-{nums[7:]}"
-    
-    # 10/11자리가 아니더라도 마침표가 있다면 하이픈으로 치환하여 최소한의 정제 시도
-    return tel_str.replace('.', '-')
+    return tel_str
 
 def create_res_template(info):
-    # 🎯 [기능] 홈페이지 없으면 목록에서 제외
+    # ✅ [요청 반영] 홈페이지 없으면 한 줄 제외
     web_line = ""
     if info.get('웹사이트') and info['웹사이트'] != "없음":
         web_line = f"🌐 웹사이트: {info['웹사이트']}\n"
     
-    # 출력 직전 전화/팩스 번호 한 번 더 포맷팅 확인
-    formatted_tel_num = format_tel(info.get('전화', '없음'))
-    formatted_fax_num = format_tel(info.get('팩스', '없음'))
+    # 출력 시 포맷팅 적용
+    tel = format_tel(info.get('전화', '없음'))
+    fax = format_tel(info.get('팩스', '없음'))
 
     text = (
         f"📋 명함 분석 결과\n"
@@ -57,8 +51,8 @@ def create_res_template(info):
         f"👤 대표: {info['대표']}\n"
         f"🎖️ 직급: {info['직급']}\n\n"
         f"📍 주소: {info['주소']}\n\n"
-        f"📞 전화: {formatted_tel_num}\n"
-        f"📠 팩스: {formatted_fax_num}\n\n"
+        f"📞 전화: {tel}\n"
+        f"📠 팩스: {fax}\n\n"
         f"📧 메일: {info['이메일']}\n"
         f"{web_line}"
         f"━━━━━━━━━━━━━━"
@@ -78,7 +72,7 @@ def create_res_template(info):
 
 def run_analysis(client, user_text, image_url):
     global call_count
-    # 🎯 사용자 상식 로직 프롬프트 유지
+    # 🎯 [상식 로직 2줄 유지]
     prompt = (
         "너는 인간의 상식을 가진 세계 최고의 명함 정리 비서다. 사진을 분석하여 다음 규칙에 따라 정보를 추출하라.\n\n"
         "1. 상호: 로고 또는 사명 전체.\n"
@@ -118,14 +112,14 @@ def run_analysis(client, user_text, image_url):
                     if key in k_raw:
                         if key == "대표":
                             v_raw = re.sub(r'(\||\/|대표이사|대표|소장|기술지원|사원|대리|과장|차장|부장|본부장|이사|팀장)', '', v_raw).strip()
-                        info[key] = v_raw # 여기서는 원본 저장, 출력 시 format_tel 적용
+                        info[key] = v_raw 
         return info
     except Exception:
         return {"상호": "분석지연", "대표": "재시도필요", "직급": "없음", "주소": "없음", "전화": "없음", "팩스": "없음", "이메일": "없음", "웹사이트": "없음"}
 
 @app.route('/')
 def home():
-    return "Business Card Bot is running!"
+    return "Server is Live!"
 
 @app.route('/api/get_biz_info', methods=['POST'])
 @app.route('/api/get_biz_info/', methods=['POST'])
@@ -140,18 +134,19 @@ def get_biz_info():
 
         if client_extra:
             name, org, job = client_extra.get('대표', '이름'), client_extra.get('상호', ''), client_extra.get('직급', '')
-            # VCF 생성 시에도 번호 포맷팅 적용
             tel = format_tel(client_extra.get('전화', ''))
             fax = format_tel(client_extra.get('팩스', ''))
             email, addr, web = client_extra.get('이메일', ''), client_extra.get('주소', ''), client_extra.get('웹사이트', '없음')
             
+            # ✅ [요청 반영] VCF 내 이름 형식을 "이름(상호)"로
             display_name = f"{name}({org})"
             vcf_content = (f"BEGIN:VCARD\r\nVERSION:3.0\r\nFN;CHARSET=UTF-8:{display_name}\r\nORG;CHARSET=UTF-8:{org}\r\n"
                            f"TITLE;CHARSET=UTF-8:{job}\r\nTEL;TYPE=CELL,VOICE:{tel}\r\nTEL;TYPE=FAX:{fax}\r\n"
                            f"EMAIL:{email}\r\nADR;CHARSET=UTF-8:;;{addr};;;\r\nURL:{web}\r\n"
                            f"NOTE;CHARSET=UTF-8:직급: {job}\\n웹사이트: {web}\r\nEND:VCARD")
             
-            fn = re.sub(r'[\\/:*?"<>|]', '', f"{name}_{org}.vcf")
+            # ✅ [성공 포인트 2] 파일명 생성 및 링크 생성 방식을 이전 코드로 복원
+            fn = f"biz_{uuid.uuid4().hex[:8]}.vcf"
             with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write(vcf_content)
             
             return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"📂 {display_name} 연락처 저장:\n{request.host_url.rstrip('/')}/download/{fn}"}}]}})
@@ -181,6 +176,7 @@ def get_biz_info():
 
 @app.route('/download/<filename>')
 def download_file(filename):
+    # ✅ [성공 포인트 3] STATIC_DIR(/tmp/static)에서 파일을 직접 전송
     return send_from_directory(STATIC_DIR, filename, as_attachment=True)
 
 if __name__ == '__main__':
