@@ -18,14 +18,28 @@ def get_client():
     if not GEMINI_API_KEY: return None
     return genai.Client(api_key=GEMINI_API_KEY)
 
+# 전화번호 하이픈 자동 삽입 함수 보강
 def format_tel(tel_str):
     if not tel_str or "없음" in tel_str: return "없음"
-    found = re.search(r'[0-9]{2,4}-[0-9]{3,4}-[0-9]{4}', tel_str)
-    if found: return found.group()
-    clean_num = re.sub(r'[^0-9]', '', tel_str)
-    return clean_num if clean_num else tel_str
+    # 이미 하이픈이 있으면 그대로 반환
+    if '-' in tel_str and len(tel_str) >= 9: return tel_str
+    
+    # 숫자만 추출
+    nums = re.sub(r'[^0-9]', '', tel_str)
+    
+    if len(nums) == 10: # 02-1234-5678 또는 010-123-4567
+        if nums.startswith('02'):
+            return f"{nums[:2]}-{nums[2:6]}-{nums[6:]}"
+        else:
+            return f"{nums[:3]}-{nums[3:6]}-{nums[6:]}"
+    elif len(nums) == 11: # 010-1234-5678
+        return f"{nums[:3]}-{nums[3:7]}-{nums[7:]}"
+    elif len(nums) == 9: # 02-123-4567
+        return f"{nums[:2]}-{nums[2:5]}-{nums[5:]}"
+    
+    return tel_str # 그 외는 그대로 반환
 
-# 결과 템플릿 생성 함수 (공통)
+# 결과 템플릿 생성 함수
 def create_res_template(info):
     return {
         "version": "2.0",
@@ -44,10 +58,10 @@ def create_res_template(info):
         }
     }
 
-# 실제 분석 로직 (모델 분리 적용)
+# 실제 분석 로직
 def run_analysis(client, user_text, image_url):
-    prompt = "명함 추출 전문가로서 상호, 대표, 주소, 전화, 팩스, 이메일을 '항목:내용' 형식으로만 출력해."
-    # 사용자님 제안: 사진은 성능 위주(latest), 텍스트는 속도/효율 위주(lite)
+    # 프롬프트에 하이픈 포함 요청 추가
+    prompt = "명함 추출 전문가로서 상호, 대표, 주소, 전화, 팩스, 이메일을 추출해. 전화와 팩스번호는 반드시 010-0000-0000 형식처럼 하이픈(-)을 포함해서 출력해."
     target_model = 'gemini-flash-latest' if image_url else 'gemini-2.5-flash-lite'
     
     if image_url:
@@ -71,6 +85,7 @@ def run_analysis(client, user_text, image_url):
                 for key in info.keys():
                     if key in k:
                         val = v.strip().strip('.')
+                        # 분석 결과 텍스트에서도 포맷 적용
                         info[key] = format_tel(val) if key in ['전화', '팩스'] else val
     return info
 
@@ -81,7 +96,6 @@ def health_check(): return "OK", 200
 def download_file(filename):
     return send_from_directory(STATIC_DIR, filename, as_attachment=True)
 
-# 🚀 루트 두 줄 유지 + 텍스트 즉시/이미지 하이브리드 로직
 @app.route('/api/get_biz_info', methods=['POST'])
 @app.route('/api/get_biz_info/', methods=['POST'])
 def get_biz_info():
@@ -94,38 +108,52 @@ def get_biz_info():
         image_url = params.get('image') or params.get('sys_plugin_image')
         callback_url = data.get('userRequest', {}).get('callbackUrl')
 
-        # [1] 연락처 파일 생성 로직 (건드리지 않음)
+        # [1] 연락처 파일 생성 로직 (VCF 버그 수정됨)
         if client_extra:
             name, org = client_extra.get('name', '이름'), client_extra.get('org', '')
             tel, fax, email, addr = client_extra.get('tel', ''), client_extra.get('fax', ''), client_extra.get('email', ''), client_extra.get('addr', '')
+            
             display_name = f"{name}({org})" if org and org != "없음" else name
-            vcf_content = f"BEGIN:VCARD\nVERSION:3.0\nFN;CHARSET=UTF-8:{display_name}\nORG;CHARSET=UTF-8:{org}\nTEL:{tel}\nTEL;TYPE=FAX:{fax}\EMAIL:{email}\nADR;CHARSET=UTF-8:;;{addr};;;\nEND:VCARD"
+            # 줄바꿈(\n)을 확실히 넣어 이메일과 팩스가 섞이지 않게 수정
+            vcf_content = (
+                "BEGIN:VCARD\nVERSION:3.0\n"
+                f"FN;CHARSET=UTF-8:{display_name}\n"
+                f"ORG;CHARSET=UTF-8:{org}\n"
+                f"TEL;TYPE=CELL,VOICE:{tel}\n"
+                f"TEL;TYPE=FAX:{fax}\n"
+                f"EMAIL:{email}\n"
+                f"ADR;CHARSET=UTF-8:;;{addr};;;\n"
+                "END:VCARD"
+            )
             fn = f"biz_{uuid.uuid4().hex[:8]}.vcf"
-            with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write(vcf_content)
-            return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"📂 {display_name} 연락처 링크:\n{request.host_url.rstrip('/')}/download/{fn}"}}]}})
+            with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f:
+                f.write(vcf_content)
+            
+            return jsonify({
+                "version": "2.0",
+                "template": { "outputs": [{"simpleText": {"text": f"📂 {display_name} 연락처 링크:\n{request.host_url.rstrip('/')}/download/{fn}"}}] }
+            })
 
-        # [2] 분석 로직 (텍스트: 즉시 / 이미지: 하이브리드)
+        # [2] 분석 모드 (텍스트 즉시 / 이미지 하이브리드)
         if not image_url:
-            # 텍스트만 있을 때: 대기 없이 즉시 응답
             if not user_text.strip():
                 return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "내용을 입력해주세요."}}]}})
             info = run_analysis(client, user_text, None)
             return jsonify(create_res_template(info))
-        
-        # 이미지가 있을 때: 3.8초 대기 후 콜백 전환
+
         state = {"info": None, "callback_sent": False}
         def worker():
             try:
                 state["info"] = run_analysis(client, user_text, image_url)
                 if state["callback_sent"] and callback_url:
                     requests.post(callback_url, json=create_res_template(state["info"]), timeout=10)
-            except:
+            except Exception as e:
                 if state["callback_sent"] and callback_url:
-                    requests.post(callback_url, json={"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석 중 오류가 발생했습니다."}}]}})
+                    requests.post(callback_url, json={"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석 오류 발생"}}]}})
 
         t = threading.Thread(target=worker)
         t.start()
-        t.join(timeout=3.8) # 5초 타임아웃 방지 대기 시간
+        t.join(timeout=3.8)
 
         if state["info"]:
             return jsonify(create_res_template(state["info"]))
@@ -135,7 +163,8 @@ def get_biz_info():
 
     except Exception as e:
         print(f"Main Error: {e}")
-        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "서버 오류가 발생했습니다."}}]}})
+        return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "서버 오류 발생"}}]}})
 
 if __name__ == '__main__':
+    # 렌더(Render) 등 호스팅 환경에 맞게 포트 설정
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
