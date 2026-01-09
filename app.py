@@ -55,8 +55,8 @@ def format_tel(tel_str):
     return tel_str
 
 # 🚀 [모델 설정] 사용자님 의도에 맞춘 이원화
-MODEL_FOR_IMAGE = 'gemini-2.0-flash-lite'       # 이미지 분석용 (안정성)
-MODEL_FOR_TEXT = 'gemini-2.0-flash-lite'   # 텍스트 분석용 (속도/효율)
+MODEL_FOR_IMAGE = 'gemini-2.5-flash-lite'       # 이미지 분석용 (안정성)
+MODEL_FOR_TEXT = 'gemini-2.5-flash-lite'   # 텍스트 분석용 (속도/효율)
 
 def run_analysis(client, user_text, image_url):
     prompt = "명함 사진에서 상호, 대표, 주소, 전화, 팩스, 이메일을 추출해. '항목: 내용' 형식으로 쓰고 없는 항목은 '없음' 표시. 전화/팩스는 하이픈 포함."
