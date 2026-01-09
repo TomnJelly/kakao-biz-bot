@@ -153,5 +153,27 @@ def get_biz_info():
     except Exception as e:
         return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "서버 오류 발생"}}]}})
 
+# ... (위쪽 기존 코드들은 그대로 두세요) ...
+
+def check_available_models():
+    client = get_client()
+    if not client:
+        print("❌ API 키가 설정되지 않았습니다.")
+        return
+    print("\n" + "="*50)
+    print("🔍 [디버깅] 현재 사용 가능한 모델 목록")
+    print("="*50)
+    try:
+        for model in client.models.list():
+            # 모델의 ID(이름)만 깔끔하게 출력합니다.
+            print(f"👉 사용 가능 모델명: {model.name}")
+        print("="*50 + "\n")
+    except Exception as e:
+        print(f"❌ 모델 목록 가져오기 실패: {e}")
+
 if __name__ == '__main__':
+    # 1. 서버가 켜지자마자 로그에 모델 목록을 출력합니다.
+    check_available_models() 
+    
+    # 2. 그 다음 실제 서버를 실행합니다.
     app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
