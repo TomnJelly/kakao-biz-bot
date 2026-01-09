@@ -10,12 +10,13 @@ from google.genai import types
 
 app = Flask(__name__)
 
-# 경로 설정 (기존에 잘 작동하던 방식 유지)
+# 경로 설정 (성공했던 /tmp/static 유지)
 STATIC_DIR = '/tmp/static'
 os.makedirs(STATIC_DIR, exist_ok=True)
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
+# 🚀 [복구] 모델 3개 분산 호출 설정
 call_count = 0
 MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
 
@@ -34,7 +35,7 @@ def format_tel(tel_str):
     return tel_str
 
 def create_res_template(info):
-    # 홈페이지가 없으면 목록에서 제외
+    # 홈페이지 없으면 목록에서 제외
     web_line = ""
     if info.get('웹사이트') and info['웹사이트'] != "없음":
         web_line = f"🌐 웹사이트: {info['웹사이트']}\n"
@@ -82,8 +83,11 @@ def run_analysis(client, user_text, image_url):
         "8. 웹사이트: 명함에 적힌 회사 홈페이지 URL.\n\n"
         "※ 주의: 확실하지 않은 정보는 '없음'으로 표기하라."
     )
+    
+    # 🚀 [복구] 여기서 모델 3개를 번갈아가며 선택합니다.
     selected_model = MODELS[call_count % len(MODELS)]
     call_count += 1
+    
     try:
         if image_url:
             img_res = requests.get(image_url, timeout=15)
@@ -131,25 +135,24 @@ def get_biz_info():
             fax = format_tel(client_extra.get('팩스', ''))
             email, addr, web = client_extra.get('이메일', ''), client_extra.get('주소', ''), client_extra.get('웹사이트', '없음')
             
-            # 🎯 [수정] VCF 내부 이름 형식을 "이름(상호)"로 설정
+            # ✅ [유지] VCF 내부 이름 형식: 이름(상호)
             display_name = f"{name}({org})"
             
-            # 🎯 [수정] 홈페이지가 '없음'이면 VCF에서 URL 항목을 완전히 제외
+            # ✅ [유지] VCF 홈페이지 유무 처리
             web_entry = f"URL:{web}\r\n" if web != "없음" else ""
             
             vcf_content = (f"BEGIN:VCARD\r\nVERSION:3.0\r\n"
-                           f"FN;CHARSET=UTF-8:{display_name}\r\n" # 주소록 표시 이름
+                           f"FN;CHARSET=UTF-8:{display_name}\r\n"
                            f"ORG;CHARSET=UTF-8:{org}\r\n"
                            f"TITLE;CHARSET=UTF-8:{job}\r\n"
                            f"TEL;TYPE=CELL,VOICE:{tel}\r\n"
                            f"TEL;TYPE=FAX:{fax}\r\n"
                            f"EMAIL:{email}\r\n"
                            f"ADR;CHARSET=UTF-8:;;{addr};;;\r\n"
-                           f"{web_entry}" # 홈페이지 유무에 따라 한 줄 추가/제외
+                           f"{web_entry}"
                            f"NOTE;CHARSET=UTF-8:직급: {job}\r\n"
                            f"END:VCARD")
             
-            # 파일명은 404 방지를 위해 기존 랜덤 ID 방식 유지
             fn = f"biz_{uuid.uuid4().hex[:8]}.vcf"
             with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write(vcf_content)
             
