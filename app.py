@@ -105,7 +105,7 @@ def create_res_template(info):
 def run_analysis(client, user_text, image_url):
     global call_count
     prompt = (
-        "너는 인간의 상식을 가진 세계 최고의 명함 정리 비서다. 사진을 분석하여 다음 규칙에 따라 정보를 추출하라.\n\n"
+        "너는 인간의 상식을 가진 세계 최고의 명함 정리 비서다. 정보를 분석하여 다음 규칙에 따라 추출하라.\n\n"
         "1. 상호: 로고 또는 사명 전체.\n"
         "2. 대표: 성함만 추출 (직급은 분리하여 '직급' 항목에 넣을 것).\n"
         "3. 직급: 부서명 또는 직위.\n"
@@ -113,7 +113,7 @@ def run_analysis(client, user_text, image_url):
         "5. 전화: 010(휴대폰) 번호를 최우선으로 '전화'에 넣고, 휴대폰이 없으면 070이나 02 등 유선번호를 채워라.\n"
         "6. 팩스: 'F'나 'FAX' 표시가 명확한 번호만 추출하라.\n"
         "7. 이메일: @ 포함 주소.\n"
-        "8. 웹사이트: 명함에 적힌 회사 홈페이지 URL.\n\n"
+        "8. 웹사이트: 회사 홈페이지 URL.\n\n"
         "※ 주의: 확실하지 않은 정보는 '없음'으로 표기하라."
     )
     
@@ -162,12 +162,13 @@ def get_biz_info():
         client_extra = data.get('action', {}).get('clientExtra', {}) or {}
         image_url = params.get('image') or params.get('sys_plugin_image')
         callback_url = data.get('userRequest', {}).get('callbackUrl')
+        # 🚀 텍스트 입력을 위한 발화 추출
+        user_utterance = data.get('userRequest', {}).get('utterance', '')
 
         if client_extra:
             name = client_extra.get('대표', '이름').strip()
             org_raw = client_extra.get('상호', '').strip()
             
-            # 🚀 중복 제거된 깔끔한 상호명 및 이름(상호) 형식
             clean_org = clean_org_name(org_raw)
             display_name = f"{name}({clean_org})" if clean_org else name
             
@@ -187,9 +188,12 @@ def get_biz_info():
             with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write("\r\n".join(vcf))
             return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"📂 {display_name} 연락처 저장:\n{request.host_url.rstrip('/')}/download/{fn}"}}]}})
 
-        if not image_url:
-            info = run_analysis(client, data.get('userRequest', {}).get('utterance', ''), None)
-            return jsonify(create_res_template(info) if info != "QUOTA_EXCEEDED" else {"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석 횟수 초과"}}]}})
+        # 🚀 이미지 없이 텍스트만 들어온 경우 처리
+        if not image_url and user_utterance:
+            info = run_analysis(client, user_utterance, None)
+            if info == "QUOTA_EXCEEDED":
+                return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석 횟수 초과"}}]}})
+            return jsonify(create_res_template(info))
 
         state = {"info": None, "is_timeout": False}
         def worker():
