@@ -52,17 +52,20 @@ def is_quota_ok(model_name):
     if len(usage['last_calls']) >= 3: return False
     return True
 
-# 🚀 숫자만 추출하여 설명 제거 (전화번호/팩스용)
+# 🚀 [수정] 전화번호 양식 강제 (점 제거 및 하이픈 통일)
 def format_tel(tel_str):
     if not tel_str or "없음" in tel_str: return "없음"
+    # 숫자만 남기고 나머지(점, 공백 등) 제거
     nums = re.sub(r'[^0-9]', '', tel_str)
+    if not nums: return "없음"
+    
     if len(nums) == 10:
         return f"{nums[:2]}-{nums[2:6]}-{nums[6:]}" if nums.startswith('02') else f"{nums[:3]}-{nums[3:6]}-{nums[6:]}"
     elif len(nums) == 11:
         return f"{nums[:3]}-{nums[3:7]}-{nums[7:]}"
-    return nums if nums else "없음"
+    return nums
 
-# 🚀 상호명 정제 (주식회사 등 제거)
+# 🚀 상호명 정제
 def clean_org_name(org_name):
     if not org_name or org_name == "없음": return ""
     return re.sub(r'(주식회사|유한회사|\(주\)|\(유\)|COMPANY|CO\.|LTD\.|CORP\.)', '', org_name, flags=re.IGNORECASE).strip()
@@ -111,20 +114,17 @@ def run_analysis(client, user_text, image_url):
         "※ 주의: 확실하지 않은 정보는 '없음'으로 표기하라."
     )
     
-    # 🚀 [수정] 강제 순환 로직: 매 호출마다 모델이 바뀝니다.
     selected_model = None
     for _ in range(len(MODELS)):
         idx = call_count % len(MODELS)
-        call_count += 1  # 호출 시도할 때마다 카운트를 올려서 다음 모델을 가리키게 함
+        call_count += 1
         candidate = MODELS[idx]
-        
         if is_quota_ok(candidate):
             selected_model = candidate
             break
             
     if not selected_model: return "QUOTA_EXCEEDED"
     
-    # 할당량 기록
     model_usage[selected_model]['day_count'] += 1
     model_usage[selected_model]['last_calls'].append(time.time())
     
@@ -172,20 +172,29 @@ def get_biz_info():
             clean_org = clean_org_name(org)
             display_name = f"{name}({clean_org})" if clean_org else name
             
-            # 🚀 VCF 파일 내부 숫자만 정제
+            # 🚀 VCF 내부용 정제
             tel = re.sub(r'[^0-9]', '', client_extra.get('전화', ''))
             fax = re.sub(r'[^0-9]', '', client_extra.get('팩스', ''))
+            email = client_extra.get('이메일', '').strip()
+            addr = client_extra.get('주소', '').strip()
+            web = client_extra.get('웹사이트', '').strip()
             
-            vcf_content = (f"BEGIN:VCARD\r\nVERSION:3.0\r\n"
-                           f"FN;CHARSET=UTF-8:{display_name}\r\n"
-                           f"N;CHARSET=UTF-8:;{display_name};;;\r\n"
-                           f"ORG;CHARSET=UTF-8:{org}\r\n"
-                           f"TEL;TYPE=CELL,VOICE:{tel}\r\n"
-                           f"TEL;TYPE=FAX:{fax}\r\n"
-                           f"EMAIL:{client_extra.get('이메일', '')}\r\n"
-                           f"ADR;CHARSET=UTF-8:;;{client_extra.get('주소', '')};;;\r\n"
-                           f"URL:{client_extra.get('웹사이트', '없음')}\r\n"
-                           f"END:VCARD")
+            # 🚀 [수정] 정보가 '없음'이거나 비어있으면 VCF 라인에서 아예 제외
+            vcf_lines = [
+                "BEGIN:VCARD",
+                "VERSION:3.0",
+                f"FN;CHARSET=UTF-8:{display_name}",
+                f"N;CHARSET=UTF-8:;{display_name};;;",
+                f"ORG;CHARSET=UTF-8:{org}"
+            ]
+            if tel and tel != "없음": vcf_lines.append(f"TEL;TYPE=CELL,VOICE:{tel}")
+            if fax and fax != "없음": vcf_lines.append(f"TEL;TYPE=FAX:{fax}")
+            if email and email != "없음": vcf_lines.append(f"EMAIL:{email}")
+            if addr and addr != "없음": vcf_lines.append(f"ADR;CHARSET=UTF-8:;;{addr};;;")
+            if web and web != "없음": vcf_lines.append(f"URL:{web}")
+            vcf_lines.append("END:VCARD")
+            
+            vcf_content = "\r\n".join(vcf_lines)
             
             fn = f"biz_{uuid.uuid4().hex[:8]}.vcf"
             with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write(vcf_content)
@@ -193,7 +202,7 @@ def get_biz_info():
 
         if not image_url:
             info = run_analysis(client, data.get('userRequest', {}).get('utterance', ''), None)
-            if info == "QUOTA_EXCEEDED": return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석 가능 횟수 초과"}}]}})
+            if info == "QUOTA_EXCEEDED": return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "1분당 분석 가능 횟수를 초과하였습니다. 1분 후에 다시 시도해주세요!"}}]}})
             return jsonify(create_res_template(info))
 
         state = {"info": None, "is_timeout": False}
@@ -206,7 +215,7 @@ def get_biz_info():
 
         if state["info"]:
             if state["info"] == "QUOTA_EXCEEDED":
-                return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "일일 할당량이 소진되었습니다. 내일 다시 시도해주세요!"}}]}})
+                return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "일일 분석 가능 횟수를 모두 소진하였습니다. 내일 다시 시도해주세요!"}}]}})
             return jsonify(create_res_template(state["info"]))
         else:
             state["is_timeout"] = True
