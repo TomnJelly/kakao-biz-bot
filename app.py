@@ -65,10 +65,7 @@ def format_tel(tel_str):
 # 🚀 상호명 정제: 한글/영문 중복 제거 및 괄호 정리
 def clean_org_name(org_name):
     if not org_name or org_name == "없음": return ""
-    # 괄호 제거 및 양끝 공백 정리
     org = org_name.replace('(', '').replace(')', '').strip()
-    
-    # 한글과 영문이 섞여 있는 경우 한글만 남겨서 중복 제거
     korean_parts = re.findall(r'[가-힣]+', org)
     if korean_parts:
         org = " ".join(korean_parts)
@@ -162,13 +159,10 @@ def get_biz_info():
         client_extra = data.get('action', {}).get('clientExtra', {}) or {}
         image_url = params.get('image') or params.get('sys_plugin_image')
         callback_url = data.get('userRequest', {}).get('callbackUrl')
-        # 🚀 텍스트 입력을 위한 발화 추출
-        user_utterance = data.get('userRequest', {}).get('utterance', '')
 
         if client_extra:
             name = client_extra.get('대표', '이름').strip()
             org_raw = client_extra.get('상호', '').strip()
-            
             clean_org = clean_org_name(org_raw)
             display_name = f"{name}({clean_org})" if clean_org else name
             
@@ -188,11 +182,10 @@ def get_biz_info():
             with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write("\r\n".join(vcf))
             return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"📂 {display_name} 연락처 저장:\n{request.host_url.rstrip('/')}/download/{fn}"}}]}})
 
-        # 🚀 이미지 없이 텍스트만 들어온 경우 처리
-        if not image_url and user_utterance:
-            info = run_analysis(client, user_utterance, None)
-            if info == "QUOTA_EXCEEDED":
-                return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석 횟수 초과"}}]}})
+        # 🚀 [사용자 코드 참고] 텍스트 정보 가져오는 부분만 추출하여 적용
+        if not image_url:
+            utterance = data.get('userRequest', {}).get('utterance', '')
+            info = run_analysis(client, utterance, None)
             return jsonify(create_res_template(info))
 
         state = {"info": None, "is_timeout": False}
