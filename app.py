@@ -52,17 +52,25 @@ def is_quota_ok(model_name):
     if len(usage['last_calls']) >= 3: return False
     return True
 
-# 🚀 [수정] 전화번호 양식 강제 (점 제거 및 하이픈 통일)
+# 🚀 [수정] 하이픈 자동 삽입 로직 (9자리, 10자리, 11자리 대응)
 def format_tel(tel_str):
     if not tel_str or "없음" in tel_str: return "없음"
-    # 숫자만 남기고 나머지(점, 공백 등) 제거
     nums = re.sub(r'[^0-9]', '', tel_str)
     if not nums: return "없음"
     
-    if len(nums) == 10:
-        return f"{nums[:2]}-{nums[2:6]}-{nums[6:]}" if nums.startswith('02') else f"{nums[:3]}-{nums[3:6]}-{nums[6:]}"
+    # 9자리 (서울 유선전화 02-123-4567 등)
+    if len(nums) == 9 and nums.startswith('02'):
+        return f"{nums[:2]}-{nums[2:5]}-{nums[5:]}"
+    # 10자리 (서울 유선전화 02-1234-5678 또는 지역번호 031-123-4567 등)
+    elif len(nums) == 10:
+        if nums.startswith('02'):
+            return f"{nums[:2]}-{nums[2:6]}-{nums[6:]}"
+        else:
+            return f"{nums[:3]}-{nums[3:6]}-{nums[6:]}"
+    # 11자리 (휴대폰 010-1234-5678 등)
     elif len(nums) == 11:
         return f"{nums[:3]}-{nums[3:7]}-{nums[7:]}"
+    
     return nums
 
 # 🚀 상호명 정제
@@ -172,14 +180,13 @@ def get_biz_info():
             clean_org = clean_org_name(org)
             display_name = f"{name}({clean_org})" if clean_org else name
             
-            # 🚀 VCF 내부용 정제
+            # VCF용은 하이픈 없이 숫자만
             tel = re.sub(r'[^0-9]', '', client_extra.get('전화', ''))
             fax = re.sub(r'[^0-9]', '', client_extra.get('팩스', ''))
             email = client_extra.get('이메일', '').strip()
             addr = client_extra.get('주소', '').strip()
             web = client_extra.get('웹사이트', '').strip()
             
-            # 🚀 [수정] 정보가 '없음'이거나 비어있으면 VCF 라인에서 아예 제외
             vcf_lines = [
                 "BEGIN:VCARD",
                 "VERSION:3.0",
@@ -195,14 +202,13 @@ def get_biz_info():
             vcf_lines.append("END:VCARD")
             
             vcf_content = "\r\n".join(vcf_lines)
-            
             fn = f"biz_{uuid.uuid4().hex[:8]}.vcf"
             with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write(vcf_content)
             return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"📂 {display_name} 연락처 저장:\n{request.host_url.rstrip('/')}/download/{fn}"}}]}})
 
         if not image_url:
             info = run_analysis(client, data.get('userRequest', {}).get('utterance', ''), None)
-            if info == "QUOTA_EXCEEDED": return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "1분당 분석 가능 횟수를 초과하였습니다. 1분 후에 다시 시도해주세요!"}}]}})
+            if info == "QUOTA_EXCEEDED": return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석 가능 횟수 초과"}}]}})
             return jsonify(create_res_template(info))
 
         state = {"info": None, "is_timeout": False}
@@ -215,7 +221,7 @@ def get_biz_info():
 
         if state["info"]:
             if state["info"] == "QUOTA_EXCEEDED":
-                return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "일일 분석 가능 횟수를 모두 소진하였습니다. 내일 다시 시도해주세요!"}}]}})
+                return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "일일 할당량이 소진되었습니다."}}]}})
             return jsonify(create_res_template(state["info"]))
         else:
             state["is_timeout"] = True
