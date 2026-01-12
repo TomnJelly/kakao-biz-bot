@@ -62,13 +62,11 @@ def format_tel(tel_str):
         return f"{nums[:3]}-{nums[3:7]}-{nums[7:]}"
     return nums
 
-# 🚀 [수정] 상호명 정제: '컴퍼니', '랩' 등 추가 수식어까지 제거
+# 🚀 상호명 정제: 수식어 제거 없이 괄호 중복 및 공백만 정리
 def clean_org_name(org_name):
     if not org_name or org_name == "없음": return ""
-    # 불필요한 수식어 목록 (컴퍼니, 랩, 코퍼레이션 등 추가)
-    trash_words = r'(주식회사|유한회사|\(주\)|\(유\)|COMPANY|CO\.|LTD\.|CORP\.|컴퍼니|코퍼레이션|연구소|랩|LAB|INC\.)'
-    org = re.sub(trash_words, '', org_name, flags=re.IGNORECASE).strip()
-    # 괄호 제거 및 공백 정리
+    # 양끝 공백 제거 후, 혹시 상호명 자체에 포함된 괄호만 제거 (중복 방지)
+    org = org_name.strip()
     org = org.replace('(', '').replace(')', '').strip()
     return org
 
@@ -162,14 +160,20 @@ def get_biz_info():
         callback_url = data.get('userRequest', {}).get('callbackUrl')
 
         if client_extra:
-            name, org_raw = client_extra.get('대표', '이름').strip(), client_extra.get('상호', '').strip()
+            name = client_extra.get('대표', '이름').strip()
+            org_raw = client_extra.get('상호', '').strip()
+            
+            # 수식어 제거 없이 괄호 중복만 방지하여 정제
             clean_org = clean_org_name(org_raw)
+            # 이름(상호 원본) 형태로 결합
             display_name = f"{name}({clean_org})" if clean_org else name
             
+            # VCF용 데이터 정제
             tel = re.sub(r'[^0-9]', '', client_extra.get('전화', ''))
             fax = re.sub(r'[^0-9]', '', client_extra.get('팩스', ''))
             email, addr, web = client_extra.get('이메일', '').strip(), client_extra.get('주소', '').strip(), client_extra.get('웹사이트', '').strip()
             
+            # VCF 생성
             vcf = ["BEGIN:VCARD", "VERSION:3.0", f"FN;CHARSET=UTF-8:{display_name}", f"N;CHARSET=UTF-8:;{display_name};;;", f"ORG;CHARSET=UTF-8:{org_raw}"]
             if tel and tel != "없음": vcf.append(f"TEL;TYPE=CELL,VOICE:{tel}")
             if fax and fax != "없음": vcf.append(f"TEL;TYPE=FAX:{fax}")
@@ -179,7 +183,9 @@ def get_biz_info():
             vcf.append("END:VCARD")
             
             fn = f"biz_{uuid.uuid4().hex[:8]}.vcf"
-            with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write("\r\n".join(vcf))
+            with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f:
+                f.write("\r\n".join(vcf))
+            
             return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"📂 {display_name} 연락처 저장:\n{request.host_url.rstrip('/')}/download/{fn}"}}]}})
 
         if not image_url:
