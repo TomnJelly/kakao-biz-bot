@@ -17,7 +17,7 @@ STATIC_DIR = '/tmp/static'
 os.makedirs(STATIC_DIR, exist_ok=True)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 🚀 모델별 쿼터 관리 변수 (모델당 하루 18회 / 1분 3회)
+# 🚀 모델 설정 및 쿼터 관리
 call_count = 0
 MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
 model_usage = {model: {'day': '', 'day_count': 0, 'last_calls': []} for model in MODELS}
@@ -52,7 +52,7 @@ def is_quota_ok(model_name):
     if len(usage['last_calls']) >= 3: return False
     return True
 
-# 🚀 숫자만 추출하여 설명 제거 (전화번호 정제)
+# 🚀 숫자만 추출하여 설명 제거 (전화번호/팩스용)
 def format_tel(tel_str):
     if not tel_str or "없음" in tel_str: return "없음"
     nums = re.sub(r'[^0-9]', '', tel_str)
@@ -68,7 +68,6 @@ def clean_org_name(org_name):
     return re.sub(r'(주식회사|유한회사|\(주\)|\(유\)|COMPANY|CO\.|LTD\.|CORP\.)', '', org_name, flags=re.IGNORECASE).strip()
 
 def create_res_template(info):
-    # 🚀 줄공백 메움 (빈 줄 없이 출력)
     lines = [
         "📋 명함 분석 결과",
         "━━━━━━━━━━━━━━",
@@ -99,7 +98,6 @@ def create_res_template(info):
 
 def run_analysis(client, user_text, image_url):
     global call_count
-    # 🚀 원본 프롬프트 복구
     prompt = (
         "너는 인간의 상식을 가진 세계 최고의 명함 정리 비서다. 사진을 분석하여 다음 규칙에 따라 정보를 추출하라.\n\n"
         "1. 상호: 로고 또는 사명 전체.\n"
@@ -113,16 +111,20 @@ def run_analysis(client, user_text, image_url):
         "※ 주의: 확실하지 않은 정보는 '없음'으로 표기하라."
     )
     
+    # 🚀 [수정] 강제 순환 로직: 매 호출마다 모델이 바뀝니다.
     selected_model = None
     for _ in range(len(MODELS)):
-        candidate = MODELS[call_count % len(MODELS)]
-        call_count += 1
+        idx = call_count % len(MODELS)
+        call_count += 1  # 호출 시도할 때마다 카운트를 올려서 다음 모델을 가리키게 함
+        candidate = MODELS[idx]
+        
         if is_quota_ok(candidate):
             selected_model = candidate
             break
             
     if not selected_model: return "QUOTA_EXCEEDED"
     
+    # 할당량 기록
     model_usage[selected_model]['day_count'] += 1
     model_usage[selected_model]['last_calls'].append(time.time())
     
@@ -167,11 +169,10 @@ def get_biz_info():
 
         if client_extra:
             name, org = client_extra.get('대표', '이름'), client_extra.get('상호', '')
-            # 🚀 이름(상호) 형식 적용
             clean_org = clean_org_name(org)
             display_name = f"{name}({clean_org})" if clean_org else name
             
-            # 🚀 VCF 내부 숫자 정제
+            # 🚀 VCF 파일 내부 숫자만 정제
             tel = re.sub(r'[^0-9]', '', client_extra.get('전화', ''))
             fax = re.sub(r'[^0-9]', '', client_extra.get('팩스', ''))
             
@@ -192,7 +193,7 @@ def get_biz_info():
 
         if not image_url:
             info = run_analysis(client, data.get('userRequest', {}).get('utterance', ''), None)
-            if info == "QUOTA_EXCEEDED": return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "할당량 초과"}}]}})
+            if info == "QUOTA_EXCEEDED": return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "분석 가능 횟수 초과"}}]}})
             return jsonify(create_res_template(info))
 
         state = {"info": None, "is_timeout": False}
@@ -205,7 +206,7 @@ def get_biz_info():
 
         if state["info"]:
             if state["info"] == "QUOTA_EXCEEDED":
-                return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "오늘 분석 한도가 소진되었습니다."}}]}})
+                return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": "일일 할당량이 소진되었습니다. 내일 다시 시도해주세요!"}}]}})
             return jsonify(create_res_template(state["info"]))
         else:
             state["is_timeout"] = True
