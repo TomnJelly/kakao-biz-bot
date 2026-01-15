@@ -161,8 +161,9 @@ def run_analysis(client, user_text, image_url):
     selected_model = None
     for _ in range(len(MODELS)):
         idx = call_count % len(MODELS)
-        call_count += 1
         candidate = MODELS[idx]
+        call_count += 1  # 🔄 루프 진입 시 무조건 카운트를 올려 다음 호출 때 다음 모델을 보게 함
+        
         if is_quota_ok(candidate):
             selected_model = candidate
             break
