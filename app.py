@@ -32,12 +32,14 @@ def append_to_sheet(info):
         return "CONFIG_ERROR"
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
+        
+        # 환경변수 JSON 파싱 에러 방지를 위한 strip() 처리
+        creds_dict = json.loads(SERVICE_ACCOUNT_JSON.strip())
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(GOOGLE_SHEET_ID).sheet1
 
-        # 1. 시트 데이터와 비교할 '순수 정보' 리스트 (시간 제외)
+        # 1. 시트 데이터와 비교할 '순수 정보' 리스트
         comparison_row = [
             info.get('상호', '없음'), 
             info.get('대표', '없음'), 
@@ -47,20 +49,20 @@ def append_to_sheet(info):
             info.get('주소', '없음')
         ]
 
-        # 2. 중복 체크: 시트의 전체 행을 가져와서 비교
+        # 2. 중복 체크 (기존 시트 데이터와 비교)
         existing_data = sh.get_all_values()
         for row in existing_data:
-            # 시트의 A~F열(row[:6])과 현재 분석한 정보가 일치하는지 확인
             if len(row) >= 6 and row[:6] == comparison_row:
                 return "DUPLICATE"
 
-        # 3. 중복이 없으면 '시간 정보'를 추가하여 최종 저장
+        # 3. 최종 저장 (정보 + 시간)
         final_row = comparison_row + [datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
         sh.append_row(final_row)
         return "SUCCESS"
 
     except Exception as e:
-        print(f"Sheet Error: {e}")
+        # 🔥 로그 확인용 에러 메시지 출력
+        print(f"🔥 시트 에러 상세: {str(e)}")
         return "ERROR"
 
 
