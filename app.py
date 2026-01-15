@@ -17,12 +17,12 @@ STATIC_DIR = '/tmp/static'
 os.makedirs(STATIC_DIR, exist_ok=True)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
-# 🚀 모델 설정 및 강제 순환 관리
+# 🚀 모델 설정 및 강제 순환 관리 (ver 1 고정)
 call_count = 0
 MODELS = ['gemini-3-flash-preview', 'gemini-2.5-flash', 'gemini-2.5-flash-lite']
 model_usage = {model: {'day': '', 'day_count': 0, 'last_calls': []} for model in MODELS}
 
-# 🚀 서버 깨우기 (Render 휴면 방지)
+# 🚀 서버 깨우기 (Render 휴면 방지 - ver 1 고정)
 def keep_alive():
     time.sleep(30)
     while True:
@@ -48,7 +48,7 @@ def is_quota_ok(model_name):
     usage['last_calls'] = [t for t in usage['last_calls'] if now - t < 60]
     return len(usage['last_calls']) < 3
 
-# 🚀 전화번호 하이픈 보정 함수
+# 🚀 전화번호 하이픈 보정 (ver 1 고정)
 def format_tel(tel_str):
     if not tel_str or "없음" in tel_str: return "없음"
     nums = re.sub(r'[^0-9]', '', tel_str)
@@ -62,7 +62,7 @@ def format_tel(tel_str):
         return f"{nums[:3]}-{nums[3:7]}-{nums[7:]}"
     return nums
 
-# 🚀 상호명 정제: 한글/영문 중복 제거 및 괄호 정리
+# 🚀 상호명 정제 (ver 1 고정)
 def clean_org_name(org_name):
     if not org_name or org_name == "없음": return ""
     org = org_name.replace('(', '').replace(')', '').strip()
@@ -160,16 +160,19 @@ def get_biz_info():
         image_url = params.get('image') or params.get('sys_plugin_image')
         callback_url = data.get('userRequest', {}).get('callbackUrl')
 
+        # 🚀 [수정 포인트] ver 1 유지 + 텍스트 수신부만 설정 화면에 맞춰 변경
+        # 설정화면의 필수 파라미터 'user_input'을 우선적으로 가져옵니다.
+        user_text = params.get('user_input') or data.get('userRequest', {}).get('utterance', '')
+
         if client_extra:
+            # (연락처 저장 로직 - ver 1 고정)
             name = client_extra.get('대표', '이름').strip()
             org_raw = client_extra.get('상호', '').strip()
             clean_org = clean_org_name(org_raw)
             display_name = f"{name}({clean_org})" if clean_org else name
-            
             tel = re.sub(r'[^0-9]', '', client_extra.get('전화', ''))
             fax = re.sub(r'[^0-9]', '', client_extra.get('팩스', ''))
             email, addr, web = client_extra.get('이메일', '').strip(), client_extra.get('주소', '').strip(), client_extra.get('웹사이트', '').strip()
-            
             vcf = ["BEGIN:VCARD", "VERSION:3.0", f"FN;CHARSET=UTF-8:{display_name}", f"N;CHARSET=UTF-8:;{display_name};;;", f"ORG;CHARSET=UTF-8:{org_raw}"]
             if tel and tel != "없음": vcf.append(f"TEL;TYPE=CELL,VOICE:{tel}")
             if fax and fax != "없음": vcf.append(f"TEL;TYPE=FAX:{fax}")
@@ -177,15 +180,13 @@ def get_biz_info():
             if addr and addr != "없음": vcf.append(f"ADR;CHARSET=UTF-8:;;{addr};;;")
             if web and web != "없음": vcf.append(f"URL:{web}")
             vcf.append("END:VCARD")
-            
             fn = f"biz_{uuid.uuid4().hex[:8]}.vcf"
             with open(os.path.join(STATIC_DIR, fn), "w", encoding="utf-8") as f: f.write("\r\n".join(vcf))
             return jsonify({"version": "2.0", "template": {"outputs": [{"simpleText": {"text": f"📂 {display_name} 연락처 저장:\n{request.host_url.rstrip('/')}/download/{fn}"}}]}})
 
-        # 🚀 [사용자 코드 참고] 텍스트 정보 가져오는 부분만 추출하여 적용
-        if not image_url:
-            utterance = data.get('userRequest', {}).get('utterance', '')
-            info = run_analysis(client, utterance, None)
+        # 🚀 [수정 포인트] 이미지 없이 텍스트(user_text)만 들어왔을 때의 처리 추가
+        if not image_url and user_text.strip():
+            info = run_analysis(client, user_text, None)
             return jsonify(create_res_template(info))
 
         state = {"info": None, "is_timeout": False}
