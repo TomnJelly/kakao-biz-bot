@@ -25,6 +25,9 @@ SHEET_ID = os.environ.get("GOOGLE_SHEET_ID") # 🚀 환경 변수 추가
 SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT") # 🚀 환경 변수 추가
 
 # 🚀 구글 시트 저장 함수 (새로 추가된 유일한 기능)
+# Version: ver 3.7
+# Update: 중복 체크 비교 대상(시간 제외) 일치 및 코드 중복 정리
+
 def append_to_sheet(info):
     if not SHEET_ID or not SERVICE_ACCOUNT_JSON:
         return "CONFIG_ERROR"
@@ -35,23 +38,32 @@ def append_to_sheet(info):
         gc = gspread.authorize(creds)
         sh = gc.open_by_key(SHEET_ID).sheet1
 
-        # 중복 체크: 대표명과 상호명이 일치하는지 확인
+        # 1. 시트 데이터와 비교할 '순수 정보' 리스트 (시간 제외)
+        comparison_row = [
+            info.get('상호', '없음'), 
+            info.get('대표', '없음'), 
+            info.get('직급', '없음'),
+            info.get('전화', '없음'), 
+            info.get('이메일', '없음'), 
+            info.get('주소', '없음')
+        ]
+
+        # 2. 중복 체크: 시트의 전체 행을 가져와서 비교
         existing_data = sh.get_all_values()
         for row in existing_data:
-            if len(row) >= 2 and row[1] == info.get('대표') and row[0] == info.get('상호'):
+            # 시트의 A~F열(row[:6])과 현재 분석한 정보가 일치하는지 확인
+            if len(row) >= 6 and row[:6] == comparison_row:
                 return "DUPLICATE"
 
-        # 데이터 추가
-        new_row = [
-            info.get('상호', '없음'), info.get('대표', '없음'), info.get('직급', '없음'),
-            info.get('전화', '없음'), info.get('이메일', '없음'), info.get('주소', '없음'),
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        ]
-        sh.append_row(new_row)
+        # 3. 중복이 없으면 '시간 정보'를 추가하여 최종 저장
+        final_row = comparison_row + [datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
+        sh.append_row(final_row)
         return "SUCCESS"
+
     except Exception as e:
         print(f"Sheet Error: {e}")
         return "ERROR"
+
 
 # 🚀 모델 설정 (사용자님 ver 1 그대로 유지)
 call_count = 0
