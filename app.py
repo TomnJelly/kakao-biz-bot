@@ -1,5 +1,4 @@
-# Version: ver 2.1
-# Update: ver 1의 모델 리스트 및 모든 로직을 100% 유지하며 구글 시트 저장 기능만 삽입
+
 
 import os
 import uuid
@@ -21,22 +20,22 @@ app = Flask(__name__)
 STATIC_DIR = '/tmp/static'
 os.makedirs(STATIC_DIR, exist_ok=True)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-SHEET_ID = os.environ.get("GOOGLE_SHEET_ID") # 🚀 환경 변수 추가
-SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SERVICE_ACCOUNT") # 🚀 환경 변수 추가
+GOOGLE_SHEET_ID = os.environ.get("GOOGLE_SHEET_ID") # 🚀 환경 변수 추가
+SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SHEETS_ACCOUNT") # 🚀 환경 변수 추가
 
 # 🚀 구글 시트 저장 함수 (새로 추가된 유일한 기능)
 # Version: ver 3.7
 # Update: 중복 체크 비교 대상(시간 제외) 일치 및 코드 중복 정리
 
 def append_to_sheet(info):
-    if not SHEET_ID or not SERVICE_ACCOUNT_JSON:
+    if not GOOGLE_SHEET_ID or not SERVICE_ACCOUNT_JSON:
         return "CONFIG_ERROR"
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds_dict = json.loads(SERVICE_ACCOUNT_JSON)
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         gc = gspread.authorize(creds)
-        sh = gc.open_by_key(SHEET_ID).sheet1
+        sh = gc.open_by_key(GOOGLE_SHEET_ID).sheet1
 
         # 1. 시트 데이터와 비교할 '순수 정보' 리스트 (시간 제외)
         comparison_row = [
