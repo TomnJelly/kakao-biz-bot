@@ -28,41 +28,57 @@ SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SHEETS_ACCOUNT") # 🚀 환경 변
 # Update: 중복 체크 비교 대상(시간 제외) 일치 및 코드 중복 정리
 
 def append_to_sheet(info):
+    # 1. 필수 설정 확인
     if not GOOGLE_SHEET_ID or not SERVICE_ACCOUNT_JSON:
+        print("❌ [환경변수 누락] GOOGLE_SHEET_ID 또는 GOOGLE_SHEETS_ACCOUNT를 확인하세요.")
         return "CONFIG_ERROR"
+    
     try:
+        # 2. 인증 및 시트 연결
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        
-        # 환경변수 JSON 파싱 에러 방지를 위한 strip() 처리
-        creds_dict = json.loads(SERVICE_ACCOUNT_JSON.strip())
+        # JSON의 줄바꿈이나 특수문자 문제를 방지하기 위해 정제 작업 추가
+        raw_json = SERVICE_ACCOUNT_JSON.strip()
+        creds_dict = json.loads(raw_json)
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         gc = gspread.authorize(creds)
+        
+        # 시트 열기
         sh = gc.open_by_key(GOOGLE_SHEET_ID).sheet1
 
-        # 1. 시트 데이터와 비교할 '순수 정보' 리스트
-        comparison_row = [
-            info.get('상호', '없음'), 
-            info.get('대표', '없음'), 
-            info.get('직급', '없음'),
-            info.get('전화', '없음'), 
-            info.get('이메일', '없음'), 
-            info.get('주소', '없음')
+        # 3. 데이터 구성 (사용자님의 시트 헤더: 회사, 이름, 직급, 전화, 이메일, 주소, 저장시간)
+        # info dictionary의 키값과 시트의 컬럼 순서를 매칭합니다.
+        new_row = [
+            info.get('상호', '없음'),   # A열: 회사
+            info.get('대표', '없음'),   # B열: 이름
+            info.get('직급', '없음'),   # C열: 직급
+            info.get('전화', '없음'),   # D열: 전화
+            info.get('이메일', '없음'), # E열: 이메일
+            info.get('주소', '없음'),   # F열: 주소
+            datetime.now().strftime('%Y-%m-%d %H:%M:%S') # G열: 저장시간
         ]
 
-        # 2. 중복 체크 (기존 시트 데이터와 비교)
-        existing_data = sh.get_all_values()
-        for row in existing_data:
-            if len(row) >= 6 and row[:6] == comparison_row:
-                return "DUPLICATE"
+        # 4. 중복 체크 (이름과 전화번호가 모두 같으면 중복으로 간주)
+        existing_rows = sh.get_all_values()
+        if len(existing_rows) > 1: # 헤더 제외 데이터가 있을 때만
+            for row in existing_rows[1:]:
+                if len(row) >= 4:
+                    if row[1] == new_row[1] and row[3] == new_row[3]:
+                        print(f"ℹ️ 중복 데이터 발견 패스: {new_row[1]}")
+                        return "DUPLICATE"
 
-        # 3. 최종 저장 (정보 + 시간)
-        final_row = comparison_row + [datetime.now().strftime('%Y-%m-%d %H:%M:%S')]
-        sh.append_row(final_row)
+        # 5. 시트 추가
+        sh.append_row(new_row)
+        print(f"✅ 시트 저장 완료: {new_row[1]} ({new_row[0]})")
         return "SUCCESS"
 
+    except json.JSONDecodeError:
+        print("🔥 [에러] GOOGLE_SHEETS_ACCOUNT 환경변수가 올바른 JSON 형식이 아닙니다.")
+        return "ERROR"
+    except gspread.exceptions.APIError as e:
+        print(f"🔥 [API 에러] 구글 시트 권한 또는 할당량 문제: {e}")
+        return "ERROR"
     except Exception as e:
-        # 🔥 로그 확인용 에러 메시지 출력
-        print(f"🔥 시트 에러 상세: {str(e)}")
+        print(f"🔥 [기타 에러] {str(e)}")
         return "ERROR"
 
 
