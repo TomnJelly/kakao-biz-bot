@@ -245,9 +245,10 @@ def get_biz_info():
             info = run_analysis(client, user_text, image_url)
             state["info"] = info
             if info and info != "QUOTA_EXCEEDED" and info.get("대표") != "재시도필요":
-                state["sheet_status"] = append_to_sheet(info) # 🚀 시트 저장 로직
+                
                 if state["is_timeout"] and callback_url:
                     requests.post(callback_url, json=create_res_template(state["info"], state["sheet_status"]), timeout=15)
+                state["sheet_status"] = append_to_sheet(info) # 🚀 시트 저장 로직
         
         t = threading.Thread(target=worker); t.start(); t.join(timeout=3.5)
         if state["info"]:
