@@ -32,34 +32,41 @@ SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SHEETS_ACCOUNT") # 🚀 환경 변
 
 def append_to_sheet(info):
     if not GOOGLE_SHEET_ID or not SERVICE_ACCOUNT_JSON:
-        print("❌ [환경변수 확인 필요] ID나 JSON 설정이 비어있습니다.")
+        print("❌ [환경변수] ID 또는 JSON 설정이 누락되었습니다.")
         return "CONFIG_ERROR"
+    
     try:
-        scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+        # 1. JSON 데이터 로드 및 보정
         raw_json = SERVICE_ACCOUNT_JSON.strip()
         creds_dict = json.loads(raw_json)
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        gc = gspread.authorize(creds)
         
-        # 1. 시트 열기
+        # 2. 새로운 인증 방식 적용 (gspread 최신 표준)
+        gc = gspread.service_account_from_dict(creds_dict)
+        
+        # 3. 시트 열기
         sh = gc.open_by_key(GOOGLE_SHEET_ID).sheet1
 
-        # 2. 데이터 정리 (기존과 동일)
+        # 4. 데이터 정리
         new_row = [
-            info.get('상호', '없음'), info.get('대표', '없음'), info.get('직급', '없음'),
-            info.get('전화', '없음'), info.get('이메일', '없음'), info.get('주소', '없음'),
+            info.get('상호', '없음'), 
+            info.get('대표', '없음'), 
+            info.get('직급', '없음'),
+            info.get('전화', '없음'), 
+            info.get('이메일', '없음'), 
+            info.get('주소', '없음'),
             datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         ]
 
-        # 3. 🚀 중복 검사 없이 바로 추가
+        # 5. 데이터 추가 (중복 체크 없이 즉시 실행)
         sh.append_row(new_row, value_input_option='USER_ENTERED')
+        
         print(f"✅ 시트 저장 성공: {new_row[1]}", flush=True)
         return "SUCCESS"
 
     except Exception as e:
-        print(f"🔥 시트 최종 예외 발생: {repr(e)}", flush=True)
+        # 상세 에러 원인 출력
+        print(f"🔥 시트 에러 상세: {repr(e)}", flush=True)
         return "ERROR"
-
 
 # 🚀 모델 설정 (사용자님 ver 1 그대로 유지)
 call_count = 0
