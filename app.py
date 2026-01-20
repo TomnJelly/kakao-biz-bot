@@ -244,11 +244,19 @@ def get_biz_info():
         def worker():
             info = run_analysis(client, user_text, image_url)
             state["info"] = info
-            if info and info != "QUOTA_EXCEEDED" and info.get("대표") != "재시도필요":
-                
-                if state["is_timeout"] and callback_url:
-                    requests.post(callback_url, json=create_res_template(state["info"], state["sheet_status"]), timeout=15)
-                state["sheet_status"] = append_to_sheet(info) # 🚀 시트 저장 로직
+            
+            # 분석 결과가 없으면 종료
+            if not info or info == "QUOTA_EXCEEDED" or info.get("대표") == "재시도필요":
+                return
+
+            # 2. [결과 전달 우선] 3.5초가 넘었을 경우 카톡 콜백을 즉시 전송
+            # 시트에 적는 시간을 기다리지 않고 바로 쏩니다.
+            if state["is_timeout"] and callback_url:
+                requests.post(callback_url, json=create_res_template(info), timeout=15)
+            
+            # 3. [시트 저장 독립] 이제 응답과는 아무 상관없이 백그라운드에서 저장 수행
+            # 저장 함수 내부의 print 로그를 통해 성공 여부를 Render 로그에서 확인 가능합니다.
+            state["sheet_status"] = append_to_sheet(info)
         
         t = threading.Thread(target=worker); t.start(); t.join(timeout=3.5)
         if state["info"]:
