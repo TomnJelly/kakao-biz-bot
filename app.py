@@ -27,55 +27,37 @@ SERVICE_ACCOUNT_JSON = os.environ.get("GOOGLE_SHEETS_ACCOUNT") # 🚀 환경 변
 # Version: ver 3.7
 # Update: 중복 체크 비교 대상(시간 제외) 일치 및 코드 중복 정리
 
+# Version: ver 5.1
+# Update: 중복 체크 제거 및 무조건 저장 로직 적용
+
 def append_to_sheet(info):
     if not GOOGLE_SHEET_ID or not SERVICE_ACCOUNT_JSON:
         print("❌ [환경변수 확인 필요] ID나 JSON 설정이 비어있습니다.")
         return "CONFIG_ERROR"
     try:
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-        
-        # 🚀 JSON 로드 전후로 데이터 상태를 강제로 출력하여 확인
         raw_json = SERVICE_ACCOUNT_JSON.strip()
-        print(f"DEBUG: JSON 데이터 길이 = {len(raw_json)}") # 0이면 변수 로드 실패
-        
-        try:
-            creds_dict = json.loads(raw_json)
-        except Exception as json_err:
-            print(f"🔥 JSON 파싱 에러 발생: {repr(json_err)}") # 에러 타입을 더 상세히 출력
-            return "ERROR"
-
+        creds_dict = json.loads(raw_json)
         creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
         gc = gspread.authorize(creds)
         
-        # 🚀 시트 ID 연결 시도 및 상세 로그
-        try:
-            sh = gc.open_by_key(GOOGLE_SHEET_ID).sheet1
-        except Exception as sheet_err:
-            print(f"🔥 시트 접근 에러: {repr(sheet_err)}") # 권한 문제인지 ID 문제인지 확인
-            return "ERROR"
+        # 1. 시트 열기
+        sh = gc.open_by_key(GOOGLE_SHEET_ID).sheet1
 
+        # 2. 데이터 정리 (기존과 동일)
         new_row = [
             info.get('상호', '없음'), info.get('대표', '없음'), info.get('직급', '없음'),
             info.get('전화', '없음'), info.get('이메일', '없음'), info.get('주소', '없음'),
             datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         ]
 
-        # 중복 체크
-        existing_data = sh.get_all_values()
-        if existing_data:
-            for row in existing_data:
-                if len(row) >= 2 and row[0] == new_row[0] and row[1] == new_row[1]:
-                    print(f"ℹ️ 중복 발견: {new_row[1]}")
-                    return "DUPLICATE"
-
-        # 데이터 추가
+        # 3. 🚀 중복 검사 없이 바로 추가
         sh.append_row(new_row, value_input_option='USER_ENTERED')
-        print(f"✅ 시트 저장 성공: {new_row[1]}")
+        print(f"✅ 시트 저장 성공: {new_row[1]}", flush=True)
         return "SUCCESS"
 
     except Exception as e:
-        # 🚀 repr(e)를 사용하여 에러가 빈 값으로 찍히는 것을 방지
-        print(f"🔥 최종 예외 발생: {repr(e)}")
+        print(f"🔥 시트 최종 예외 발생: {repr(e)}", flush=True)
         return "ERROR"
 
 
